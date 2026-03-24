@@ -1,0 +1,16 @@
+export const dynamic = "force-dynamic"
+import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { syncEmails } from '@/services/email-sync-service'
+
+export async function POST() {
+  const user = await getAuthUser()
+  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
+
+  try {
+    const result = await syncEmails(user.id)
+    return success(result)
+  } catch (err: any) {
+    console.error('Sync failed:', err)
+    return error('SYNC_FAILED', err.message || 'Email sync failed', 500)
+  }
+}
