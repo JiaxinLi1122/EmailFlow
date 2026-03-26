@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { getAuthUser, success, error } from '@/lib/api-helpers'
+import * as taskRepo from '@/repositories/task-repo'
 
 export async function GET(
   req: NextRequest,
@@ -11,26 +11,7 @@ export async function GET(
   if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
 
   const { id } = await params
-  const task = await prisma.task.findFirst({
-    where: { id, userId: user.id },
-    include: {
-      emailLinks: {
-        include: {
-          email: {
-            select: {
-              id: true,
-              subject: true,
-              sender: true,
-              bodyPreview: true,
-              receivedAt: true,
-              classification: true,
-            },
-          },
-        },
-      },
-    },
-  })
-
+  const task = await taskRepo.findTaskById(user.id, id)
   if (!task) return error('NOT_FOUND', 'Task not found', 404)
   return success(task)
 }
@@ -46,13 +27,13 @@ export async function PATCH(
   const body = await req.json()
 
   // Verify ownership
-  const existing = await prisma.task.findFirst({ where: { id, userId: user.id } })
+  const existing = await taskRepo.findTaskById(user.id, id)
   if (!existing) return error('NOT_FOUND', 'Task not found', 404)
 
   // Build update data from allowed fields
   const allowed = [
     'title', 'summary', 'status', 'urgency', 'impact',
-    'startDate', 'userSetDeadline', 'userNotes',
+    'startDate', 'userSetDeadline', 'userNotes', 'checkedActionItems',
   ]
   const dateFields = ['startDate', 'userSetDeadline']
   const data: any = { isUserEdited: true, updatedAt: new Date() }
@@ -76,7 +57,7 @@ export async function PATCH(
     data.priorityScore = u * i
   }
 
-  // Handle status transitions — allow reverting
+  // Handle status transitions
   if (body.status === 'confirmed') {
     data.confirmedAt = new Date()
     data.dismissedAt = null
@@ -93,6 +74,6 @@ export async function PATCH(
     data.completedAt = null
   }
 
-  const updated = await prisma.task.update({ where: { id }, data })
+  const updated = await taskRepo.updateTask(id, data)
   return success(updated)
 }

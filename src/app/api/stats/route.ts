@@ -1,41 +1,23 @@
 export const dynamic = "force-dynamic"
-import { prisma } from '@/lib/prisma'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { NextResponse } from 'next/server'
+import { getAuthUser, success } from '@/lib/api-helpers'
+import * as statsRepo from '@/repositories/stats-repo'
+
+const EMPTY_STATS = {
+  emails: { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 },
+  tasks: { total: 0, pending: 0, completed: 0, dismissed: 0 },
+  sync: { lastSyncAt: null, gmailConnected: false, syncEnabled: false },
+}
 
 export async function GET() {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
+  try {
+    const user = await getAuthUser()
+    if (!user) return NextResponse.json({ success: true, data: EMPTY_STATS })
 
-  const [
-    totalEmails,
-    actionEmails,
-    awarenessEmails,
-    ignoreEmails,
-    uncertainEmails,
-    totalTasks,
-    pendingTasks,
-    completedTasks,
-    dismissedTasks,
-    userInfo,
-  ] = await Promise.all([
-    prisma.email.count({ where: { userId: user.id } }),
-    prisma.email.count({ where: { userId: user.id, classification: 'action' } }),
-    prisma.email.count({ where: { userId: user.id, classification: 'awareness' } }),
-    prisma.email.count({ where: { userId: user.id, classification: 'ignore' } }),
-    prisma.email.count({ where: { userId: user.id, classification: 'uncertain' } }),
-    prisma.task.count({ where: { userId: user.id } }),
-    prisma.task.count({ where: { userId: user.id, status: 'pending' } }),
-    prisma.task.count({ where: { userId: user.id, status: 'completed' } }),
-    prisma.task.count({ where: { userId: user.id, status: 'dismissed' } }),
-    prisma.user.findUnique({
-      where: { id: user.id },
-      select: { lastSyncAt: true, gmailConnected: true, syncEnabled: true },
-    }),
-  ])
-
-  return success({
-    emails: { total: totalEmails, action: actionEmails, awareness: awarenessEmails, ignore: ignoreEmails, uncertain: uncertainEmails },
-    tasks: { total: totalTasks, pending: pendingTasks, completed: completedTasks, dismissed: dismissedTasks },
-    sync: { lastSyncAt: userInfo?.lastSyncAt, gmailConnected: userInfo?.gmailConnected, syncEnabled: userInfo?.syncEnabled },
-  })
+    const stats = await statsRepo.getDashboardStats(user.id)
+    return success(stats)
+  } catch (err) {
+    console.error('[api/stats GET]', err)
+    return NextResponse.json({ success: true, data: EMPTY_STATS })
+  }
 }

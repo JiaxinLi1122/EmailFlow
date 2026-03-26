@@ -8,11 +8,12 @@ datasource db {
 }
 
 model User {
-  id         String    @id @default(cuid())
-  email      String    @unique
-  name       String?
-  image      String?
-  timezone   String    @default("UTC")
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  image        String?
+  passwordHash String?
+  timezone     String    @default("UTC")
 
   gmailAccessToken  String?
   gmailRefreshToken String?
@@ -106,8 +107,9 @@ model Task {
   deadlineConfidence Float?
   userSetDeadline    DateTime?
 
-  isUserEdited Boolean   @default(false)
-  userNotes    String?
+  isUserEdited       Boolean @default(false)
+  userNotes          String?
+  checkedActionItems String  @default("[]") // JSON array of checked indices
   confirmedAt  DateTime?
   dismissedAt  DateTime?
   completedAt  DateTime?

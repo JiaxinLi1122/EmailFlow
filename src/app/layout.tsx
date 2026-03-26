@@ -1,14 +1,12 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
-import { Providers } from '@/components/providers'
-import { Sidebar } from '@/components/sidebar'
-import { Header } from '@/components/header'
-import { PageTransition } from '@/components/page-transition'
+import { QueryProviders } from '@/components/providers'
 import { Toaster } from '@/components/ui/sonner'
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })
+const inter = Inter({ variable: '--font-inter', subsets: ['latin'] })
+const jakarta = Plus_Jakarta_Sans({ variable: '--font-jakarta', subsets: ['latin'], weight: ['500', '600', '700', '800'] })
+const jetbrainsMono = JetBrains_Mono({ variable: '--font-jetbrains', subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'EmailFlow AI',
@@ -19,20 +17,12 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
+    <html lang="en" className={`${inter.variable} ${jakarta.variable} ${jetbrainsMono.variable} h-full`}>
       <body className="h-full bg-gray-50 antialiased">
-        <Providers>
-          <div className="flex h-full">
-            <Sidebar />
-            <div className="flex flex-1 flex-col overflow-hidden">
-              <Header />
-              <main className="flex-1 overflow-y-auto p-6">
-                <PageTransition>{children}</PageTransition>
-              </main>
-            </div>
-          </div>
+        <QueryProviders>
+          {children}
           <Toaster />
-        </Providers>
+        </QueryProviders>
       </body>
     </html>
   )

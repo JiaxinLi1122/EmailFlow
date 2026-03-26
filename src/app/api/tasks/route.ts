@@ -1,52 +1,36 @@
 export const dynamic = "force-dynamic"
+import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { getAuthUser, success } from '@/lib/api-helpers'
+import * as taskRepo from '@/repositories/task-repo'
+
+const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
+  try {
+    const user = await getAuthUser()
+    if (!user) return NextResponse.json(EMPTY_LIST)
 
-  const url = req.nextUrl
-  const page = parseInt(url.searchParams.get('page') || '1')
-  const limit = parseInt(url.searchParams.get('limit') || '50')
-  const status = url.searchParams.get('status')
-  const sort = url.searchParams.get('sort') || 'priority' // priority | date | deadline
+    const url = req.nextUrl
+    const page = parseInt(url.searchParams.get('page') || '1')
+    const limit = parseInt(url.searchParams.get('limit') || '50')
+    const status = url.searchParams.get('status') || undefined
+    const sort = (url.searchParams.get('sort') || 'priority') as 'priority' | 'date' | 'deadline' | 'title'
 
-  const where: any = { userId: user.id }
-  if (status) where.status = status
+    const { tasks, total } = await taskRepo.findTasksPaginated(user.id, {
+      page,
+      limit,
+      status,
+      sort,
+    })
 
-  const orderBy: any =
-    sort === 'priority'
-      ? { priorityScore: 'desc' }
-      : sort === 'deadline'
-        ? { inferredDeadline: 'asc' }
-        : sort === 'title'
-          ? { title: 'asc' }
-          : { createdAt: 'desc' }
-
-  const [tasks, total] = await Promise.all([
-    prisma.task.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * limit,
-      take: limit,
-      include: {
-        emailLinks: {
-          include: {
-            email: {
-              select: { id: true, subject: true, sender: true, receivedAt: true },
-            },
-          },
-        },
-      },
-    }),
-    prisma.task.count({ where }),
-  ])
-
-  return success(tasks, {
-    page,
-    totalPages: Math.ceil(total / limit),
-    totalCount: total,
-  })
+    return success(tasks, {
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
+    })
+  } catch (err) {
+    console.error('[api/tasks GET]', err)
+    return NextResponse.json(EMPTY_LIST)
+  }
 }

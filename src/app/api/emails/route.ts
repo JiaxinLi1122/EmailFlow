@@ -1,38 +1,34 @@
 export const dynamic = "force-dynamic"
+import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { getAuthUser, success } from '@/lib/api-helpers'
+import * as emailRepo from '@/repositories/email-repo'
+
+const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
+  try {
+    const user = await getAuthUser()
+    if (!user) return NextResponse.json(EMPTY_LIST)
 
-  const url = req.nextUrl
-  const page = parseInt(url.searchParams.get('page') || '1')
-  const limit = parseInt(url.searchParams.get('limit') || '20')
-  const classification = url.searchParams.get('classification')
+    const url = req.nextUrl
+    const page = parseInt(url.searchParams.get('page') || '1')
+    const limit = parseInt(url.searchParams.get('limit') || '20')
+    const classification = url.searchParams.get('classification') || undefined
 
-  const where: any = { userId: user.id }
-  if (classification) where.classification = classification
+    const { emails, total } = await emailRepo.findEmailsPaginated(user.id, {
+      page,
+      limit,
+      classification,
+    })
 
-  const [emails, total] = await Promise.all([
-    prisma.email.findMany({
-      where,
-      orderBy: { receivedAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-      include: {
-        taskLinks: {
-          include: { task: { select: { id: true, title: true, status: true } } },
-        },
-      },
-    }),
-    prisma.email.count({ where }),
-  ])
-
-  return success(emails, {
-    page,
-    totalPages: Math.ceil(total / limit),
-    totalCount: total,
-  })
+    return success(emails, {
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalCount: total,
+    })
+  } catch (err) {
+    console.error('[api/emails GET]', err)
+    return NextResponse.json(EMPTY_LIST)
+  }
 }

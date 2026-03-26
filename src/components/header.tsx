@@ -1,7 +1,6 @@
 'use client'
 
-import { useDemoSession } from '@/lib/use-demo-session'
-import { signOut } from 'next-auth/react'
+import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -14,7 +13,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 
 export function Header() {
-  const { data: session } = useDemoSession()
+  const { user, logout } = useAuth()
   const queryClient = useQueryClient()
 
   const syncMutation = useMutation({
@@ -44,19 +43,11 @@ export function Header() {
           <DropdownMenuTrigger
             className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100"
           >
-            {(session?.user as any)?.image ? (
-              <img
-                src={(session.user as any).image}
-                alt=""
-                className="h-6 w-6 rounded-full"
-              />
-            ) : (
-              <User className="h-4 w-4" />
-            )}
-            <span>{session?.user?.name || 'User'}</span>
+            <User className="h-4 w-4" />
+            <span>{user?.name || 'User'}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => signOut()}>
+            <DropdownMenuItem onClick={() => logout()}>
               <LogOut className="mr-2 h-4 w-4" />
               Sign out
             </DropdownMenuItem>
