@@ -18,17 +18,42 @@ import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import Link from 'next/link'
 
-function parseActionItems(raw: any): string[] {
-  if (Array.isArray(raw)) return raw
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return raw ? [raw] : []
+interface ChecklistItem {
+  id: string
+  text: string
+  level: number
+  completed: boolean
+}
+
+function parseActionItems(raw: any): ChecklistItem[] {
+  if (!raw) return []
+
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+
+    // New format: already structured as ChecklistItem[]
+    if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'object' && 'id' in parsed[0]) {
+      return parsed
     }
+
+    // Legacy format: simple string array — convert to ChecklistItem[]
+    if (Array.isArray(parsed)) {
+      return parsed.map((text, idx) => ({
+        id: `item-${idx}`,
+        text: String(text),
+        level: 0,
+        completed: false,
+      }))
+    }
+
+    return []
+  } catch {
+    return []
   }
-  return []
+}
+
+function generateId(): string {
+  return `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: typeof CheckCircle2 }> = {
@@ -59,7 +84,8 @@ export default function TaskDetailPage() {
   const [editNotes, setEditNotes] = useState('')
   const [editStatus, setEditStatus] = useState('pending')
   const [isEditing, setIsEditing] = useState(false)
-  const [checkedItems, setCheckedItems] = useState<number[]>([])
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
 
   useEffect(() => {
     if (task) {
@@ -74,10 +100,19 @@ export default function TaskDetailPage() {
       setEditImpact(task.impact || 3)
       setEditNotes(task.userNotes || '')
       setEditStatus(task.status || 'pending')
+
+      // Parse checklist items and mark completed ones
+      const items = parseActionItems(task.actionItems)
       try {
-        const parsed = JSON.parse(task.checkedActionItems || '[]')
-        setCheckedItems(Array.isArray(parsed) ? parsed : [])
-      } catch { setCheckedItems([]) }
+        const checked = JSON.parse(task.checkedActionItems || '[]')
+        const checkedSet = new Set(Array.isArray(checked) ? checked : [])
+        setChecklistItems(items.map(item => ({
+          ...item,
+          completed: checkedSet.has(item.id)
+        })))
+      } catch {
+        setChecklistItems(items)
+      }
     }
   }, [task])
 
@@ -128,12 +163,72 @@ export default function TaskDetailPage() {
     )
   }
 
-  const toggleCheckItem = (index: number) => {
-    const next = checkedItems.includes(index)
-      ? checkedItems.filter((i) => i !== index)
-      : [...checkedItems, index]
-    setCheckedItems(next)
-    updateTask.mutate({ checkedActionItems: JSON.stringify(next) })
+  const saveChecklist = () => {
+    const checkedIds = checklistItems.filter(item => item.completed).map(item => item.id)
+    updateTask.mutate({
+      actionItems: JSON.stringify(checklistItems),
+      checkedActionItems: JSON.stringify(checkedIds)
+    })
+  }
+
+  const toggleCheckItem = (id: string) => {
+    const next = checklistItems.map(item =>
+      item.id === id ? { ...item, completed: !item.completed } : item
+    )
+    setChecklistItems(next)
+  }
+
+  const updateItemText = (id: string, text: string) => {
+    const next = checklistItems.map(item =>
+      item.id === id ? { ...item, text } : item
+    )
+    setChecklistItems(next)
+  }
+
+  const deleteItem = (id: string) => {
+    const next = checklistItems.filter(item => item.id !== id)
+    setChecklistItems(next)
+  }
+
+  const addItem = (parentId?: string) => {
+    const parentItem = parentId ? checklistItems.find(i => i.id === parentId) : null
+    const newLevel = parentItem ? parentItem.level + 1 : 0
+    const parentIndex = parentItem ? checklistItems.indexOf(parentItem) : -1
+
+    const newItem: ChecklistItem = {
+      id: generateId(),
+      text: '',
+      level: newLevel,
+      completed: false,
+    }
+
+    if (parentIndex >= 0) {
+      // Insert after parent
+      const next = [...checklistItems]
+      next.splice(parentIndex + 1, 0, newItem)
+      setChecklistItems(next)
+    } else {
+      setChecklistItems([...checklistItems, newItem])
+    }
+    setEditingItemId(newItem.id)
+  }
+
+  const outdentItem = (id: string) => {
+    const next = checklistItems.map(item =>
+      item.id === id && item.level > 0 ? { ...item, level: item.level - 1 } : item
+    )
+    setChecklistItems(next)
+  }
+
+  const indentItem = (id: string) => {
+    const itemIndex = checklistItems.findIndex(i => i.id === id)
+    if (itemIndex <= 0) return
+
+    const prevItem = checklistItems[itemIndex - 1]
+    const next = checklistItems.map((item, idx) =>
+      idx === itemIndex ? { ...item, level: prevItem.level + 1 } : item
+    )
+    setChecklistItems(next)
   }
 
   if (isLoading) {
@@ -164,7 +259,6 @@ export default function TaskDetailPage() {
   }
 
   const band = getPriorityBand(task.priorityScore || 0)
-  const actionItems = parseActionItems(task.actionItems)
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const sts = statusConfig[task.status] || statusConfig.pending
   const StsIcon = sts.icon
@@ -365,54 +459,150 @@ export default function TaskDetailPage() {
             </Card>
           )}
 
-          {/* Checklist — interactive todo */}
-          {actionItems.length > 0 && (
+          {/* Checklist — fully editable */}
+          {checklistItems.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <ListChecks className="h-4 w-4 text-blue-500" />
                   Checklist
                   <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
-                    {checkedItems.length}/{actionItems.length}
+                    {checklistItems.filter(i => i.completed).length}/{checklistItems.length}
                   </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-1">
+              <CardContent className="space-y-2">
                 {/* Progress bar */}
-                {actionItems.length > 1 && (
+                {checklistItems.length > 1 && (
                   <div className="mb-3 h-1.5 rounded-full bg-gray-100 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                      style={{ width: `${(checkedItems.length / actionItems.length) * 100}%` }}
+                      style={{ width: `${(checklistItems.filter(i => i.completed).length / checklistItems.length) * 100}%` }}
                     />
                   </div>
                 )}
+
+                {/* Item list */}
                 <ul className="space-y-1">
-                  {actionItems.map((item: string, i: number) => {
-                    const isChecked = checkedItems.includes(i)
+                  {checklistItems.map((item) => {
+                    const isEditing = editingItemId === item.id
+                    const indent = `pl-${item.level * 4}`
                     return (
-                      <li key={i}>
+                      <li
+                        key={item.id}
+                        className={`flex items-center gap-2 rounded-lg transition-all hover:bg-gray-50 group ${indent}`}
+                        style={{ paddingLeft: `${item.level * 16}px` }}
+                      >
+                        {/* Checkbox */}
                         <button
-                          onClick={() => toggleCheckItem(i)}
-                          className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-all hover:bg-gray-50 group ${
-                            isChecked ? 'opacity-60' : ''
-                          }`}
+                          onClick={() => toggleCheckItem(item.id)}
+                          className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors"
                         >
-                          {isChecked ? (
-                            <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                          {item.completed ? (
+                            <CheckSquare className="h-4 w-4 text-blue-500" />
                           ) : (
-                            <Square className="mt-0.5 h-4 w-4 shrink-0 text-gray-300 group-hover:text-blue-400 transition-colors" />
+                            <Square className="h-4 w-4 text-gray-300 group-hover:text-blue-400 transition-colors" />
                           )}
-                          <span className={`text-sm leading-snug transition-all ${
-                            isChecked ? 'text-gray-400 line-through' : 'text-gray-700'
-                          }`}>
-                            {item}
-                          </span>
                         </button>
+
+                        {/* Text / Input */}
+                        <div className="flex-1 min-w-0">
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={item.text}
+                              onChange={(e) => updateItemText(item.id, e.target.value)}
+                              onBlur={() => setEditingItemId(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') setEditingItemId(null)
+                                if (e.key === 'Escape') setEditingItemId(null)
+                              }}
+                              className="w-full text-sm bg-blue-50 border border-blue-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          ) : (
+                            <span
+                              onClick={() => setEditingItemId(item.id)}
+                              className={`block text-sm cursor-text py-1.5 px-1 -mx-1 rounded transition-all ${
+                                item.completed
+                                  ? 'text-gray-400 line-through'
+                                  : 'text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              {item.text || '(empty)'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {item.level > 0 && (
+                            <button
+                              onClick={() => outdentItem(item.id)}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-gray-600"
+                              title="Outdent"
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="15 18 9 12 15 6" />
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => indentItem(item.id)}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-gray-600"
+                            title="Indent"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => addItem(item.id)}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-blue-600"
+                            title="Add subtask"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <line x1="12" y1="5" x2="12" y2="19" />
+                              <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => deleteItem(item.id)}
+                            className="p-1 hover:bg-red-50 rounded transition-colors text-gray-400 hover:text-red-500"
+                            title="Delete"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
                       </li>
                     )
                   })}
                 </ul>
+
+                {/* Add & Save buttons */}
+                <div className="flex gap-2 pt-2 border-t mt-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => addItem()}
+                    className="text-xs gap-1.5 h-8"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Add Item
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={saveChecklist}
+                    disabled={updateTask.isPending}
+                    className="text-xs gap-1.5 h-8"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    {updateTask.isPending ? 'Saving...' : 'Save Checklist'}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

@@ -33,7 +33,7 @@ export async function PATCH(
   // Build update data from allowed fields
   const allowed = [
     'title', 'summary', 'status', 'urgency', 'impact',
-    'startDate', 'userSetDeadline', 'userNotes', 'checkedActionItems',
+    'startDate', 'userSetDeadline', 'userNotes', 'checkedActionItems', 'actionItems',
   ]
   const dateFields = ['startDate', 'userSetDeadline']
   const data: any = { isUserEdited: true, updatedAt: new Date() }
