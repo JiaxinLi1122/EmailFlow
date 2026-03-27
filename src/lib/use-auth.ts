@@ -28,7 +28,7 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
-    queryClient.setQueryData(['auth-user'], null)
+    queryClient.invalidateQueries({ queryKey: ['auth-user'] })
     router.push('/auth/signin')
   }, [queryClient, router])
 
