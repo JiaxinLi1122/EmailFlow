@@ -14,6 +14,8 @@ export async function POST() {
 
     const qrCodeDataUrl = await QRCode.toDataURL(uri)
 
+    console.log('SECRET:', secret)
+
     return NextResponse.json({
       success: true,
       data: {
