@@ -1,14 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function TotpSetupPage() {
   const [qrCode, setQrCode] = useState('')
   const [secret, setSecret] = useState('')
   const [token, setToken] = useState('')
-
-  const userId = 'demo'
-
+  const [userId, setUserId] = useState('')
   const [verifyResult, setVerifyResult] = useState('')
   const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -39,6 +37,23 @@ export default function TotpSetupPage() {
     } finally {
       setLoading(false)
     }
+
+    useEffect(() => {
+      async function loadMe() {
+        try {
+          const res = await fetch('/api/auth/me')
+          const data = await res.json()
+
+          if (data.success) {
+            setUserId(data.data.userId)
+          }
+        } catch {
+          // ignore for now
+        }
+      }
+
+      loadMe()
+    }, [])
   }
 
   async function handleVerify() {
@@ -64,6 +79,11 @@ export default function TotpSetupPage() {
       }
 
       if (data.data.isValid) {
+          if (!userId) {
+            setError('No logged-in user found')
+            return
+          }
+
         const enableRes = await fetch('/api/auth/totp/enable', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
