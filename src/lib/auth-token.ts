@@ -8,6 +8,7 @@ const MAX_AGE = 30 * 24 * 60 * 60 // 30 days in seconds
 export interface TokenPayload {
   userId: string
   email: string
+  purpose?: 'pre-2fa'
 }
 
 export function createToken(payload: TokenPayload): string {

@@ -1,14 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Zap, Loader2 } from 'lucide-react'
 
-export default function SignInPage() {
+export default function VerifyTotpPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const searchParams = useSearchParams()
+  const tempToken = searchParams.get('token') || ''
+
+  const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,21 +20,19 @@ export default function SignInPage() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/verify-totp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          tempToken,
+          totpCode,
+        }),
       })
 
       const data = await res.json()
 
       if (!data.success) {
-        setError(data.error || 'Login failed')
-        return
-      }
-
-      if (data.requiresTwoFactor) {
-        router.push(`/auth/verify-totp?token=${encodeURIComponent(data.tempToken)}`)
+        setError(data.error || 'Verification failed')
         return
       }
 
@@ -54,13 +54,17 @@ export default function SignInPage() {
             </div>
             <span className="text-xl font-bold text-gray-900">EmailFlow AI</span>
           </Link>
-          <p className="mt-3 text-sm text-gray-500">Welcome back</p>
+          <p className="mt-3 text-sm text-gray-500">Two-factor authentication</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
           className="space-y-4 rounded-xl border bg-white p-6 shadow-sm"
         >
+          <div className="text-sm text-gray-600">
+            Enter the 6-digit code from your authenticator app.
+          </div>
+
           {error && (
             <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
               {error}
@@ -69,27 +73,15 @@ export default function SignInPage() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Email
+              Authenticator Code
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              required
-              className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="6-digit code"
               required
               className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
@@ -97,20 +89,20 @@ export default function SignInPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !tempToken}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Log in
+            Verify
           </button>
-        </form>
 
-        <p className="mt-4 text-center text-sm text-gray-500">
-          Don&apos;t have an account?{' '}
-          <Link href="/auth/signup" className="text-blue-600 hover:underline">
-            Sign up
+          <Link
+            href="/auth/signin"
+            className="block text-center text-sm text-blue-600 hover:underline"
+          >
+            Back to login
           </Link>
-        </p>
+        </form>
       </div>
     </div>
   )

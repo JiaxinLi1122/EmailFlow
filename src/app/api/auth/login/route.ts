@@ -5,7 +5,7 @@ import { createToken, setSessionCookie } from '@/lib/auth-token'
 
 export async function POST(req: Request) {
   try {
-    const { email, password, totpCode } = await req.json()
+    const { email, password } = await req.json()
 
     if (!email || !password) {
       return NextResponse.json(
@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     }
 
     const user = await prisma.user.findUnique({ where: { email } })
+
     if (!user || !user.passwordHash) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password' },
@@ -23,41 +24,38 @@ export async function POST(req: Request) {
     }
 
     const valid = await verifyPassword(password, user.passwordHash)
+
     if (!valid) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password' },
         { status: 401 }
       )
     }
-    // 2FA
+
     if (user.totpEnabled) {
-      if (!totpCode) {
-        return NextResponse.json(
-          { success: false, error: 'Authenticator code required' },
-          { status: 401 }
-        )
-      }
-
-      const OTPAuth = await import('otplib')
-
-      const result = await OTPAuth.verify({
-        token: totpCode,
-        secret: user.totpSecret!,
+      const tempToken = createToken({
+        userId: user.id,
+        email: user.email,
+        purpose: 'pre-2fa',
       })
 
-      if (!result.valid) {
-        return NextResponse.json(
-          { success: false, error: 'Invalid authenticator code' },
-          { status: 401 }
-        )
-      }
+      return NextResponse.json({
+        success: true,
+        requiresTwoFactor: true,
+        tempToken,
+      })
     }
 
-    const token = createToken({ userId: user.id, email: user.email })
+    const token = createToken({
+      userId: user.id,
+      email: user.email,
+    })
+
     await setSessionCookie(token)
 
     return NextResponse.json({
       success: true,
+      requiresTwoFactor: false,
       data: { id: user.id, email: user.email, name: user.name },
     })
   } catch (err) {
