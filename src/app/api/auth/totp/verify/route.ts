@@ -12,14 +12,16 @@ export async function POST(req: Request) {
       )
     }
 
-    const isValid = verify({
+    const result = await verify({
       token,
       secret,
     })
 
     return NextResponse.json({
       success: true,
-      data: { isValid },
+      data: {
+        isValid: result.valid,
+      },
     })
   } catch (err) {
     console.error('[api/auth/totp/verify]', err)

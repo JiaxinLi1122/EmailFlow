@@ -40,12 +40,12 @@ export async function POST(req: Request) {
 
       const OTPAuth = await import('otplib')
 
-      const isValid = OTPAuth.authenticator.verify({
+      const result = await OTPAuth.verify({
         token: totpCode,
         secret: user.totpSecret!,
       })
 
-      if (!isValid) {
+      if (!result.valid) {
         return NextResponse.json(
           { success: false, error: 'Invalid authenticator code' },
           { status: 401 }

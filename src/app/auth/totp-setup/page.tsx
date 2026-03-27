@@ -5,12 +5,17 @@ import { useState } from 'react'
 export default function TotpSetupPage() {
   const [qrCode, setQrCode] = useState('')
   const [secret, setSecret] = useState('')
+  const [token, setToken] = useState('')
+  const [verifyResult, setVerifyResult] = useState('')
   const [loading, setLoading] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState('')
 
   async function handleGenerate() {
     setLoading(true)
     setError('')
+    setVerifyResult('')
+    setToken('')
 
     try {
       const res = await fetch('/api/auth/totp/setup', {
@@ -33,12 +38,42 @@ export default function TotpSetupPage() {
     }
   }
 
+  async function handleVerify() {
+    setVerifying(true)
+    setError('')
+    setVerifyResult('')
+
+    try {
+      const res = await fetch('/api/auth/totp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          secret,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!data.success) {
+        setError(data.error || 'Failed to verify code')
+        return
+      }
+
+      setVerifyResult(data.data.isValid ? 'Valid code ✅' : 'Invalid code ❌')
+    } catch {
+      setError('Something went wrong')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-md rounded-xl border bg-white p-6 shadow-sm">
         <h1 className="mb-2 text-xl font-bold text-gray-900">Set up Authenticator</h1>
         <p className="mb-4 text-sm text-gray-500">
-          Click the button below to generate a QR code.
+          First generate a QR code, then scan it with your authenticator app.
         </p>
 
         <button
@@ -57,7 +92,11 @@ export default function TotpSetupPage() {
 
         {qrCode && (
           <div className="space-y-4">
-            <img src={qrCode} alt="TOTP QR Code" className="w-64 h-64 mx-auto border rounded-lg" />
+            <img
+              src={qrCode}
+              alt="TOTP QR Code"
+              className="mx-auto h-64 w-64 rounded-lg border"
+            />
 
             <div>
               <p className="text-sm font-medium text-gray-700">Secret:</p>
@@ -65,6 +104,33 @@ export default function TotpSetupPage() {
                 {secret}
               </p>
             </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Enter 6-digit code
+              </label>
+              <input
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="123456"
+                className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            <button
+              onClick={handleVerify}
+              disabled={verifying || !token || !secret}
+              className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              {verifying ? 'Verifying...' : 'Verify Code'}
+            </button>
+
+            {verifyResult && (
+              <div className="rounded-lg bg-gray-100 px-4 py-3 text-sm text-gray-800">
+                {verifyResult}
+              </div>
+            )}
           </div>
         )}
       </div>
