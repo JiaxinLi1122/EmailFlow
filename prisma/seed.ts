@@ -3,11 +3,17 @@ import { PrismaClient } from '@prisma/client'
 const prisma = new PrismaClient()
 
 async function main() {
-  // Create demo user
   const user = await prisma.user.upsert({
     where: { email: 'demo@emailflow.ai' },
-    update: {},
+    update: {
+      name: 'Demo User',
+      timezone: 'Asia/Shanghai',
+      gmailConnected: true,
+      syncEnabled: true,
+      lastSyncAt: new Date(),
+    },
     create: {
+      id: 'demo',
       email: 'demo@emailflow.ai',
       name: 'Demo User',
       timezone: 'Asia/Shanghai',
@@ -17,12 +23,13 @@ async function main() {
     },
   })
 
-  // Create a session for demo user (so they're "logged in")
-  const expires = new Date()
-  expires.setDate(expires.getDate() + 30)
+  const expires = daysFromNow(30)
   await prisma.session.upsert({
     where: { sessionToken: 'demo-session-token' },
-    update: { expires },
+    update: {
+      userId: user.id,
+      expires,
+    },
     create: {
       sessionToken: 'demo-session-token',
       userId: user.id,
@@ -30,347 +37,499 @@ async function main() {
     },
   })
 
-  // Create mock emails (from two different email accounts)
   const WORK_EMAIL = 'demo@emailflow.ai'
   const PERSONAL_EMAIL = 'demo.personal@gmail.com'
 
   const emails = [
     {
       gmailMessageId: 'msg-001',
+      threadId: 'thread-001',
       accountEmail: WORK_EMAIL,
       subject: 'Q1 Report — Please review and submit by EOD Friday',
       sender: 'Sarah Chen <sarah@clientcorp.com>',
-      bodyPreview: 'Hi, please review the attached Q1 report and submit your feedback by end of day Friday. The board meeting is on Monday and we need finalized numbers. Key areas to focus: revenue projections (page 3) and cost breakdown (page 7). Let me know if you have questions.',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview:
+        'Please review the Q1 report and send your feedback by Friday EOD.',
+      bodyFull:
+        'Hi, please review the attached Q1 report and submit feedback by Friday EOD. Focus especially on page 3 revenue projections and page 7 cost breakdown.',
       receivedAt: daysAgo(0),
+      labels: JSON.stringify(['INBOX', 'IMPORTANT']),
+      hasAttachments: true,
       classification: 'action',
       classConfidence: 0.95,
-      classReasoning: 'Explicit request with deadline — review and submit by Friday',
+      classReasoning: 'Explicit deliverable with clear deadline',
       isWorkRelated: true,
     },
     {
       gmailMessageId: 'msg-002',
+      threadId: 'thread-002',
       accountEmail: WORK_EMAIL,
-      subject: 'Contract Draft v2 — Review clauses 3 and 7',
-      sender: 'Legal Team <legal@legalco.com>',
-      bodyPreview: 'Attached is the updated contract draft. We\'ve revised clauses 3 (liability cap) and 7 (termination terms) based on your feedback. Please review and confirm by next Tuesday so we can proceed with signing.',
+      subject: 'Weekly status update',
+      sender: 'Mike Johnson <mike@team.co>',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview:
+        'Frontend is 80% complete, backend ready, QA starts Monday.',
+      bodyFull:
+        'Weekly update: frontend is 80% complete, backend API endpoints are functional, QA starts next Monday. No blockers and budget is on track.',
       receivedAt: daysAgo(1),
-      classification: 'action',
-      classConfidence: 0.92,
-      classReasoning: 'Contract review request with specific deadline — next Tuesday',
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: false,
+      classification: 'awareness',
+      classConfidence: 0.91,
+      classReasoning: 'Informational status update only',
       isWorkRelated: true,
     },
     {
       gmailMessageId: 'msg-003',
+      threadId: 'thread-003',
       accountEmail: PERSONAL_EMAIL,
-      subject: 'Internship Interview — Confirm your availability',
-      sender: 'Career Office <coordinator@uni.edu>',
-      bodyPreview: 'We have scheduled your internship interview for next Wednesday at 2pm. Please confirm your availability or suggest an alternative time by this Friday.',
-      receivedAt: daysAgo(1),
-      classification: 'action',
-      classConfidence: 0.88,
-      classReasoning: 'Interview scheduling — requires confirmation response',
-      isWorkRelated: true,
+      subject: '50% OFF SALE 🔥',
+      sender: 'ShopMart <deals@shopmart.com>',
+      recipients: JSON.stringify(['demo.personal@gmail.com']),
+      bodyPreview: 'Big discount today only.',
+      bodyFull:
+        'Today only: up to 50% off electronics, home goods, and more.',
+      receivedAt: daysAgo(0),
+      labels: JSON.stringify(['INBOX', 'PROMOTIONS']),
+      hasAttachments: false,
+      classification: 'ignore',
+      classConfidence: 0.98,
+      classReasoning: 'Promotional email',
+      isWorkRelated: false,
     },
     {
       gmailMessageId: 'msg-004',
+      threadId: 'thread-004',
       accountEmail: WORK_EMAIL,
-      subject: 'Partnership opportunity — Let\'s schedule a call',
-      sender: 'Alex Wong <alex@startup.io>',
-      bodyPreview: 'Hi! I came across your work and would love to explore a potential partnership. We\'re building a complementary product and think there could be synergies. Would you be open to a 30-min call next week?',
-      receivedAt: daysAgo(2),
-      classification: 'uncertain',
-      classConfidence: 0.45,
-      classReasoning: 'Unknown sender — could be genuine opportunity or cold outreach',
+      subject: 'Reminder: Submit timesheet today',
+      sender: 'HR <hr@company.com>',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview: 'Please submit your weekly timesheet before 6pm today.',
+      bodyFull:
+        'Friendly reminder to submit your weekly timesheet before 6pm today so payroll can be processed on time.',
+      receivedAt: daysAgo(0),
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: false,
+      classification: 'action',
+      classConfidence: 0.93,
+      classReasoning: 'Same-day deadline and explicit action',
       isWorkRelated: true,
     },
     {
       gmailMessageId: 'msg-005',
-      accountEmail: WORK_EMAIL,
-      subject: 'Project Alpha — Weekly status update',
-      sender: 'Mike Johnson <mike@team.co>',
-      bodyPreview: 'Weekly update: Frontend is 80% complete. Backend API endpoints are all functional. QA testing starts next Monday. No blockers currently. Budget is on track.',
+      threadId: 'thread-005',
+      accountEmail: PERSONAL_EMAIL,
+      subject: 'Password reset request',
+      sender: 'Security <security@service.com>',
+      recipients: JSON.stringify(['demo.personal@gmail.com']),
+      bodyPreview: 'Click here to reset your password.',
+      bodyFull:
+        'We received a password reset request. If this was you, complete the reset within 24 hours. If not, ignore this email and monitor your account.',
       receivedAt: daysAgo(0),
-      classification: 'awareness',
-      classConfidence: 0.91,
-      classReasoning: 'Status update — informational only, no action required',
-      isWorkRelated: true,
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: false,
+      classification: 'action',
+      classConfidence: 0.86,
+      classReasoning: 'Potential security action required',
+      isWorkRelated: false,
     },
     {
       gmailMessageId: 'msg-006',
-      accountEmail: PERSONAL_EMAIL,
-      subject: 'Your Stripe payment was successful',
-      sender: 'Stripe <notifications@stripe.com>',
-      bodyPreview: 'Payment of $49.99 for your Pro subscription was processed successfully. Receipt attached.',
+      threadId: 'thread-006',
+      accountEmail: WORK_EMAIL,
+      subject: 'Contract draft ready — confirm by Tuesday',
+      sender: 'Legal Team <legal@vendor.com>',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview: 'Please review clauses 3 and 7 before Tuesday.',
+      bodyFull:
+        'Attached is the updated contract draft. Please review clauses 3 and 7 and confirm by Tuesday so we can proceed.',
       receivedAt: daysAgo(1),
-      classification: 'awareness',
-      classConfidence: 0.87,
-      classReasoning: 'Payment confirmation — informational notification',
-      isWorkRelated: false,
+      labels: JSON.stringify(['INBOX', 'IMPORTANT']),
+      hasAttachments: true,
+      classification: 'action',
+      classConfidence: 0.92,
+      classReasoning: 'Legal review with explicit deadline',
+      isWorkRelated: true,
     },
     {
       gmailMessageId: 'msg-007',
-      accountEmail: PERSONAL_EMAIL,
-      subject: 'Design Community Weekly Newsletter',
-      sender: 'Design Weekly <hello@designweekly.com>',
-      bodyPreview: 'This week: Top 10 UI trends for 2026, Interview with the Figma design team, Free icon pack download...',
-      receivedAt: daysAgo(2),
-      classification: 'ignore',
-      classConfidence: 0.94,
-      classReasoning: 'Newsletter — no action required',
-      isWorkRelated: false,
+      threadId: 'thread-007',
+      accountEmail: WORK_EMAIL,
+      subject: 'Invoice #2048 due in 3 days',
+      sender: 'CloudHost <billing@cloudhost.io>',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview: 'Hosting invoice is due in 3 days.',
+      bodyFull:
+        'Invoice #2048 for hosting services is due in 3 days. Please pay promptly to avoid any service interruption.',
+      receivedAt: daysAgo(0),
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: true,
+      classification: 'action',
+      classConfidence: 0.89,
+      classReasoning: 'Payment deadline and service risk',
+      isWorkRelated: true,
     },
     {
       gmailMessageId: 'msg-008',
+      threadId: 'thread-008',
       accountEmail: PERSONAL_EMAIL,
-      subject: '50% OFF — Spring Sale ends tomorrow!',
-      sender: 'ShopMart <deals@shopmart.com>',
-      bodyPreview: 'Don\'t miss our biggest spring sale! Up to 50% off on electronics, home goods, and more. Offer ends tomorrow.',
-      receivedAt: daysAgo(0),
-      classification: 'ignore',
-      classConfidence: 0.98,
-      classReasoning: 'Promotional spam — no work relevance',
+      subject: 'Flight booking confirmation ✈️',
+      sender: 'Airline <booking@airline.com>',
+      recipients: JSON.stringify(['demo.personal@gmail.com']),
+      bodyPreview: 'Your flight to Sydney has been confirmed.',
+      bodyFull:
+        'Your booking is confirmed. Departure is next Tuesday at 9:40am. Check-in opens 24 hours before departure.',
+      receivedAt: daysAgo(2),
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: false,
+      classification: 'awareness',
+      classConfidence: 0.9,
+      classReasoning: 'Travel confirmation',
       isWorkRelated: false,
     },
     {
       gmailMessageId: 'msg-009',
+      threadId: 'thread-009',
       accountEmail: WORK_EMAIL,
-      subject: 'Invoice #1234 — Payment due in 5 days',
-      sender: 'CloudHost <billing@cloudhost.io>',
-      bodyPreview: 'Your invoice #1234 for $29.00 (March hosting) is due on March 29. Please ensure payment to avoid service interruption.',
-      receivedAt: daysAgo(0),
-      classification: 'action',
-      classConfidence: 0.82,
-      classReasoning: 'Invoice with payment deadline — requires action',
-      isWorkRelated: true,
-    },
-    {
-      gmailMessageId: 'msg-010',
-      accountEmail: WORK_EMAIL,
-      subject: 'Brand collaboration request — Instagram campaign',
-      sender: 'Jamie Lee <jamie@brandagency.com>',
-      bodyPreview: 'Hi! We represent TechGadgets and would love to feature your product in our upcoming Instagram campaign. Budget is $2,000 for 3 posts. Interested? We need a response by end of this week.',
-      receivedAt: daysAgo(1),
-      classification: 'action',
-      classConfidence: 0.79,
-      classReasoning: 'Business opportunity with deadline — requires decision',
+      subject: 'Partnership opportunity — Let’s schedule a call',
+      sender: 'Alex Wong <alex@startup.io>',
+      recipients: JSON.stringify(['demo@emailflow.ai']),
+      bodyPreview:
+        'Would you be open to a 30-minute call next week to discuss partnership?',
+      bodyFull:
+        'Hi, I came across your work and would love to explore a potential partnership. Would you be open to a 30-minute call next week?',
+      receivedAt: daysAgo(2),
+      labels: JSON.stringify(['INBOX']),
+      hasAttachments: false,
+      classification: 'uncertain',
+      classConfidence: 0.46,
+      classReasoning: 'Could be genuine opportunity or cold outreach',
       isWorkRelated: true,
     },
   ]
 
-  for (const emailData of emails) {
+  for (const email of emails) {
     await prisma.email.upsert({
-      where: { gmailMessageId: emailData.gmailMessageId },
-      update: {},
+      where: { gmailMessageId: email.gmailMessageId },
+      update: {
+        userId: user.id,
+        threadId: email.threadId,
+        accountEmail: email.accountEmail,
+        subject: email.subject,
+        sender: email.sender,
+        recipients: email.recipients,
+        bodyPreview: email.bodyPreview,
+        bodyFull: email.bodyFull,
+        receivedAt: email.receivedAt,
+        labels: email.labels,
+        hasAttachments: email.hasAttachments,
+        classification: email.classification,
+        classConfidence: email.classConfidence,
+        classReasoning: email.classReasoning,
+        isWorkRelated: email.isWorkRelated,
+        processedAt: new Date(),
+      },
       create: {
         userId: user.id,
-        ...emailData,
-        recipients: '',
-        labels: '',
-        hasAttachments: false,
-        bodyFull: emailData.bodyPreview,
+        gmailMessageId: email.gmailMessageId,
+        threadId: email.threadId,
+        accountEmail: email.accountEmail,
+        subject: email.subject,
+        sender: email.sender,
+        recipients: email.recipients,
+        bodyPreview: email.bodyPreview,
+        bodyFull: email.bodyFull,
+        receivedAt: email.receivedAt,
+        labels: email.labels,
+        hasAttachments: email.hasAttachments,
+        classification: email.classification,
+        classConfidence: email.classConfidence,
+        classReasoning: email.classReasoning,
+        isWorkRelated: email.isWorkRelated,
         processedAt: new Date(),
       },
     })
   }
 
-  // Create mock tasks (linked to action emails)
-  const actionEmails = await prisma.email.findMany({
-    where: { userId: user.id, classification: 'action' },
-  })
-
-  const taskData = [
+  const taskBlueprints = [
     {
-      title: 'Review and submit Q1 report feedback',
-      summary: 'Sarah needs Q1 report feedback by Friday for Monday board meeting. Focus on revenue projections (p3) and cost breakdown (p7).',
-      actionItems: JSON.stringify(['Review revenue projections on page 3', 'Check cost breakdown on page 7', 'Submit feedback to Sarah']),
-      urgency: 5, impact: 5, priorityScore: 25,
-      priorityReason: 'Explicit deadline (Friday), high-stakes board meeting on Monday',
-      startDate: daysAgo(1),
-      explicitDeadline: nextFriday(),
+      sourceMessageId: 'msg-001',
+      title: 'Review Q1 report and send feedback',
+      summary:
+        'Review key pages of the Q1 report and send feedback before Friday EOD.',
+      actionItems: [
+        'Review page 3 revenue projections',
+        'Review page 7 cost breakdown',
+        'Reply to Sarah with final feedback',
+      ],
+      urgency: 5,
+      impact: 5,
+      priorityScore: 25,
+      priorityReason: 'Board meeting dependency and hard Friday deadline',
+      startDate: daysAgo(0),
+      explicitDeadline: nextWeekday(5),
+      inferredDeadline: null,
       deadlineConfidence: 0.95,
+      status: 'pending',
     },
     {
-      title: 'Review contract draft — clauses 3 and 7',
-      summary: 'LegalCo sent updated contract with revised liability cap and termination terms. Review and confirm by Tuesday.',
-      actionItems: JSON.stringify(['Review clause 3 (liability cap)', 'Review clause 7 (termination terms)', 'Send confirmation to legal team']),
-      urgency: 4, impact: 4, priorityScore: 16,
-      priorityReason: 'Legal contract with specific deadline, affects business relationship',
-      startDate: daysFromNow(1),
-      explicitDeadline: nextTuesday(),
+      sourceMessageId: 'msg-004',
+      title: 'Submit weekly timesheet',
+      summary: 'Complete and submit timesheet before 6pm today.',
+      actionItems: [
+        'Open timesheet system',
+        'Fill in work hours',
+        'Submit before 6pm',
+      ],
+      urgency: 5,
+      impact: 3,
+      priorityScore: 15,
+      priorityReason: 'Same-day administrative deadline',
+      startDate: daysAgo(0),
+      explicitDeadline: todayAt(18, 0),
+      inferredDeadline: null,
+      deadlineConfidence: 0.98,
+      status: 'pending',
+    },
+    {
+      sourceMessageId: 'msg-005',
+      title: 'Review password reset request',
+      summary:
+        'Check whether the password reset request was legitimate and act if needed.',
+      actionItems: [
+        'Verify whether you requested the reset',
+        'Reset password if legitimate',
+        'Monitor account if suspicious',
+      ],
+      urgency: 4,
+      impact: 4,
+      priorityScore: 16,
+      priorityReason: 'Potential account security risk',
+      startDate: daysAgo(0),
+      explicitDeadline: null,
+      inferredDeadline: daysFromNow(1),
+      deadlineConfidence: 0.8,
+      status: 'pending',
+    },
+    {
+      sourceMessageId: 'msg-006',
+      title: 'Review contract clauses 3 and 7',
+      summary: 'Review the updated contract draft and respond before Tuesday.',
+      actionItems: [
+        'Review clause 3',
+        'Review clause 7',
+        'Reply to legal team',
+      ],
+      urgency: 4,
+      impact: 5,
+      priorityScore: 20,
+      priorityReason: 'Legal review with explicit external deadline',
+      startDate: daysAgo(0),
+      explicitDeadline: nextWeekday(2),
+      inferredDeadline: null,
       deadlineConfidence: 0.92,
+      status: 'pending',
     },
     {
-      title: 'Confirm internship interview availability',
-      summary: 'Interview scheduled for next Wednesday 2pm. Need to confirm or suggest alternative by Friday.',
-      actionItems: JSON.stringify(['Check calendar for Wednesday 2pm', 'Reply to confirm availability']),
-      urgency: 3, impact: 3, priorityScore: 9,
-      priorityReason: 'Interview scheduling with moderate deadline',
-      startDate: daysFromNow(0),
-      inferredDeadline: nextFriday(),
-      deadlineConfidence: 0.88,
-    },
-    {
-      title: 'Pay CloudHost invoice #1234',
-      summary: 'March hosting invoice $29.00 due in 5 days. Pay to avoid service interruption.',
-      actionItems: JSON.stringify(['Log into CloudHost billing portal', 'Process payment of $29.00']),
-      urgency: 3, impact: 4, priorityScore: 12,
-      priorityReason: 'Payment deadline, risk of service disruption',
-      startDate: daysFromNow(3),
-      explicitDeadline: daysFromNow(5),
-      deadlineConfidence: 0.90,
-    },
-    {
-      title: 'Respond to brand collaboration offer',
-      summary: 'TechGadgets offering $2,000 for 3 Instagram posts. Need to decide by end of week.',
-      actionItems: JSON.stringify(['Evaluate if TechGadgets aligns with brand', 'Decide on collaboration', 'Reply to Jamie by Friday']),
-      urgency: 2, impact: 4, priorityScore: 8,
-      priorityReason: 'Revenue opportunity but not urgent — deadline is end of week',
-      startDate: daysFromNow(2),
-      inferredDeadline: nextFriday(),
-      deadlineConfidence: 0.75,
+      sourceMessageId: 'msg-007',
+      title: 'Pay CloudHost invoice #2048',
+      summary: 'Pay hosting invoice to avoid service interruption.',
+      actionItems: [
+        'Open billing portal',
+        'Review invoice details',
+        'Complete payment',
+      ],
+      urgency: 4,
+      impact: 4,
+      priorityScore: 16,
+      priorityReason: 'Service continuity risk if unpaid',
+      startDate: daysAgo(0),
+      explicitDeadline: daysFromNow(3),
+      inferredDeadline: null,
+      deadlineConfidence: 0.9,
+      status: 'pending',
     },
   ]
 
-  for (let i = 0; i < taskData.length && i < actionEmails.length; i++) {
-    const task = await prisma.task.create({
-      data: {
+  for (const blueprint of taskBlueprints) {
+    const sourceEmail = await prisma.email.findUnique({
+      where: { gmailMessageId: blueprint.sourceMessageId },
+    })
+
+    if (!sourceEmail) continue
+
+    let task = await prisma.task.findFirst({
+      where: {
         userId: user.id,
-        ...taskData[i],
-        status: 'pending',
+        title: blueprint.title,
       },
     })
-    await prisma.taskEmail.create({
-      data: {
+
+    if (!task) {
+      task = await prisma.task.create({
+        data: {
+          userId: user.id,
+          title: blueprint.title,
+          summary: blueprint.summary,
+          actionItems: JSON.stringify(blueprint.actionItems),
+          status: blueprint.status,
+          urgency: blueprint.urgency,
+          impact: blueprint.impact,
+          priorityScore: blueprint.priorityScore,
+          priorityReason: blueprint.priorityReason,
+          startDate: blueprint.startDate,
+          explicitDeadline: blueprint.explicitDeadline,
+          inferredDeadline: blueprint.inferredDeadline,
+          deadlineConfidence: blueprint.deadlineConfidence,
+        },
+      })
+    } else {
+      task = await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          summary: blueprint.summary,
+          actionItems: JSON.stringify(blueprint.actionItems),
+          status: task.status,
+          urgency: blueprint.urgency,
+          impact: blueprint.impact,
+          priorityScore: blueprint.priorityScore,
+          priorityReason: blueprint.priorityReason,
+          startDate: blueprint.startDate,
+          explicitDeadline: blueprint.explicitDeadline,
+          inferredDeadline: blueprint.inferredDeadline,
+          deadlineConfidence: blueprint.deadlineConfidence,
+        },
+      })
+    }
+
+    await prisma.taskEmail.upsert({
+      where: {
+        taskId_emailId: {
+          taskId: task.id,
+          emailId: sourceEmail.id,
+        },
+      },
+      update: {
+        relationship: 'source',
+      },
+      create: {
         taskId: task.id,
-        emailId: actionEmails[i].id,
+        emailId: sourceEmail.id,
         relationship: 'source',
       },
     })
   }
 
-  // Create mock digests — daily + weekly
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  yesterday.setHours(0, 0, 0, 0)
-  const yesterdayEnd = new Date(yesterday)
-  yesterdayEnd.setDate(yesterdayEnd.getDate() + 1)
+  const standaloneTasks = [
+    {
+      title: 'Prepare presentation slides',
+      summary: 'Create demo slides for product walkthrough.',
+      actionItems: ['Draft slide outline', 'Add screenshots', 'Practice demo'],
+      urgency: 2,
+      impact: 3,
+      priorityScore: 6,
+      priorityReason: 'Useful for stakeholder demo preparation',
+      startDate: daysFromNow(1),
+      inferredDeadline: daysFromNow(4),
+      status: 'pending',
+    },
+    {
+      title: 'Plan next week schedule',
+      summary: 'Organize meetings and focus blocks for next week.',
+      actionItems: [
+        'Review calendar',
+        'Block focus time',
+        'Prioritize top tasks',
+      ],
+      urgency: 2,
+      impact: 2,
+      priorityScore: 4,
+      priorityReason: 'Improves planning and reduces deadline stress',
+      startDate: daysFromNow(2),
+      inferredDeadline: daysFromNow(5),
+      status: 'pending',
+    },
+  ]
 
-  const twoDaysAgo = new Date(yesterday)
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 1)
-  const twoDaysAgoEnd = new Date(twoDaysAgo)
-  twoDaysAgoEnd.setDate(twoDaysAgoEnd.getDate() + 1)
+  for (const t of standaloneTasks) {
+    const existing = await prisma.task.findFirst({
+      where: {
+        userId: user.id,
+        title: t.title,
+      },
+    })
 
-  const weekStart = new Date(yesterday)
-  weekStart.setDate(weekStart.getDate() - 6)
+    if (!existing) {
+      await prisma.task.create({
+        data: {
+          userId: user.id,
+          title: t.title,
+          summary: t.summary,
+          actionItems: JSON.stringify(t.actionItems),
+          status: t.status,
+          urgency: t.urgency,
+          impact: t.impact,
+          priorityScore: t.priorityScore,
+          priorityReason: t.priorityReason,
+          startDate: t.startDate,
+          inferredDeadline: t.inferredDeadline,
+        },
+      })
+    }
+  }
 
-  // Daily digest — yesterday
-  await prisma.digest.create({
-    data: {
+  const todayStart = startOfDay(new Date())
+  const todayEnd = endOfDay(new Date())
+
+  const existingDigest = await prisma.digest.findFirst({
+    where: {
       userId: user.id,
       period: 'daily',
-      periodStart: yesterday,
-      periodEnd: yesterdayEnd,
-      content: `## Daily Digest — ${yesterday.toLocaleDateString()}
-
-### Action Required (5 tasks)
-1. **Review and submit Q1 report feedback** — Due: Friday — Priority: Critical (25)
-   From: Sarah Chen, client request for board meeting. Focus areas: revenue projections (p3) and cost breakdown (p7).
-2. **Review contract draft — clauses 3 and 7** — Due: Tuesday — Priority: High (16)
-   From: LegalCo, updated liability cap and termination terms need your sign-off.
-3. **Pay CloudHost invoice #1234** — Due: 5 days — Priority: High (12)
-   $29.00 hosting fee — pay promptly to avoid service interruption.
-4. **Confirm internship interview availability** — Due: Friday — Priority: Medium (9)
-   Wednesday 2pm interview slot. Respond to Career Office with confirmation.
-5. **Respond to brand collaboration offer** — Due: Friday — Priority: Medium (8)
-   TechGadgets offering $2,000 for 3 Instagram posts. Evaluate brand alignment.
-
-### Awareness (2 emails)
-- **Project Alpha — Weekly status update** from Mike Johnson: Frontend 80% complete, backend APIs done, QA starts Monday. No blockers, budget on track.
-- **Stripe payment confirmation** — $49.99 Pro subscription processed successfully.
-
-### Needs Your Review (1 item)
-- **Partnership opportunity** from Alex Wong (startup.io) — AI confidence: 45%. Could be genuine collaboration opportunity or cold outreach. Recommend quick LinkedIn check on sender before engaging.
-
-### Recommendations
-- Start with the Q1 report review — it's your highest-priority item with a hard Friday deadline.
-- The contract review can be batched with the Q1 report since both involve document review.
-- Consider blocking 30 minutes this afternoon for the CloudHost payment — quick win to clear it.`,
-      stats: JSON.stringify({ actionCount: 5, awarenessCount: 2, unresolvedCount: 1, ignoredCount: 2 }),
+      periodStart: todayStart,
+      periodEnd: todayEnd,
     },
   })
 
-  // Daily digest — two days ago
-  await prisma.digest.create({
-    data: {
-      userId: user.id,
-      period: 'daily',
-      periodStart: twoDaysAgo,
-      periodEnd: twoDaysAgoEnd,
-      content: `## Daily Digest — ${twoDaysAgo.toLocaleDateString()}
+  const digestContent = `## Daily Digest
 
-### Action Required (2 tasks)
-1. **Review contract draft — clauses 3 and 7** — Due: Tuesday — Priority: High (16)
-   Initial contract received from LegalCo.
-2. **Respond to brand collaboration offer** — Due: Friday — Priority: Medium (8)
-   New inquiry from Jamie Lee at BrandAgency for TechGadgets campaign.
+### Timeline
+- **Today 6:00 PM** — Submit weekly timesheet
+- **Tomorrow** — Review password reset request if still unresolved
+- **In 3 days** — Pay CloudHost invoice #2048
+- **By Tuesday** — Review contract clauses 3 and 7
+- **By Friday** — Review Q1 report and send feedback
 
-### Awareness (1 email)
-- **Design Community Weekly Newsletter** — Top 10 UI trends for 2026, Figma team interview.
+### Linked email tasks
+- Q1 report review is linked to Sarah Chen's email
+- Timesheet submission is linked to the HR reminder
+- Contract review is linked to the legal team email
+- Invoice payment is linked to the CloudHost billing email
 
-### Needs Your Review (1 item)
-- **Partnership opportunity** from Alex Wong (startup.io) — New contact, needs evaluation.
+### Summary
+You have several action-oriented emails that have been converted into tasks with dates and priorities. Highest-priority items are the Q1 report, the contract review, and the invoice payment.`
 
-### Recommendations
-- The contract review is your most time-sensitive item. Schedule a focused block tomorrow.
-- The brand collab offer has an end-of-week deadline — no rush today.`,
-      stats: JSON.stringify({ actionCount: 2, awarenessCount: 1, unresolvedCount: 1, ignoredCount: 1 }),
-    },
+  const digestStats = JSON.stringify({
+    totalEmails: emails.length,
+    actionTasks: taskBlueprints.length,
+    standaloneTasks: standaloneTasks.length,
+    awarenessEmails: emails.filter((e) => e.classification === 'awareness').length,
+    ignoredEmails: emails.filter((e) => e.classification === 'ignore').length,
   })
 
-  // Weekly digest
-  await prisma.digest.create({
-    data: {
-      userId: user.id,
-      period: 'weekly',
-      periodStart: weekStart,
-      periodEnd: yesterdayEnd,
-      content: `## Weekly Summary — ${weekStart.toLocaleDateString()} to ${yesterday.toLocaleDateString()}
+  if (!existingDigest) {
+    await prisma.digest.create({
+      data: {
+        userId: user.id,
+        period: 'daily',
+        periodStart: todayStart,
+        periodEnd: todayEnd,
+        content: digestContent,
+        stats: digestStats,
+      },
+    })
+  }
 
-### Overview
-This was a **moderately busy week** with 10 emails processed across 2 accounts. The AI identified 5 action items, classified 2 as awareness, flagged 1 as uncertain, and filtered out 2 as noise.
-
-### Key Metrics
-- **Email volume**: 10 total (6 work, 4 personal)
-- **Action rate**: 50% of emails required action — higher than typical
-- **AI confidence**: Average 85% classification confidence
-- **Task completion**: 0 of 5 tasks completed (all still pending)
-
-### Top Priorities This Week
-1. **Q1 Report Review** (Critical, Score: 25) — Board meeting dependency, Friday deadline
-2. **Contract Review** (High, Score: 16) — Legal sign-off needed by Tuesday
-3. **CloudHost Payment** (High, Score: 12) — Service continuity risk
-4. **Interview Confirmation** (Medium, Score: 9) — Career opportunity
-5. **Brand Collaboration** (Medium, Score: 8) — Revenue opportunity
-
-### Email Sources
-- **demo@emailflow.ai** (Work): 6 emails — 4 action, 1 awareness, 1 uncertain
-- **demo.personal@gmail.com** (Personal): 4 emails — 1 action, 1 awareness, 2 ignored
-
-### Patterns Detected
-- Most action emails arrived on weekday mornings
-- Legal and client emails consistently flagged as high priority
-- Newsletter and promotional emails correctly filtered to "ignore"
-- One uncertain classification (Alex Wong partnership) — suggest creating a "known contacts" list to improve future accuracy
-
-### Recommendations for Next Week
-- Clear the Q1 report and contract review early in the week to avoid deadline stress
-- Set up auto-pay for recurring invoices like CloudHost to reduce task noise
-- Review the uncertain sender (Alex Wong) to train the classifier`,
-      stats: JSON.stringify({ actionCount: 5, awarenessCount: 2, unresolvedCount: 1, ignoredCount: 2 }),
-    },
-  })
-
-  console.log('Seed complete! Demo user: demo@emailflow.ai')
+  console.log('✅ Seed complete! Demo user id =', user.id)
 }
 
 function daysAgo(n: number): Date {
@@ -385,18 +544,39 @@ function daysFromNow(n: number): Date {
   return d
 }
 
-function nextFriday(): Date {
+function nextWeekday(targetDay: number): Date {
   const d = new Date()
-  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7))
+  const current = d.getDay()
+  let diff = (targetDay - current + 7) % 7
+  if (diff === 0) diff = 7
+  d.setDate(d.getDate() + diff)
   return d
 }
 
-function nextTuesday(): Date {
+function todayAt(hour: number, minute: number): Date {
   const d = new Date()
-  d.setDate(d.getDate() + ((2 - d.getDay() + 7) % 7 || 7))
+  d.setHours(hour, minute, 0, 0)
+  return d
+}
+
+function startOfDay(date: Date): Date {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function endOfDay(date: Date): Date {
+  const d = new Date(date)
+  d.setHours(23, 59, 59, 999)
   return d
 }
 
 main()
-  .then(() => prisma.$disconnect())
-  .catch((e) => { console.error(e); prisma.$disconnect(); process.exit(1) })
+  .then(async () => {
+    await prisma.$disconnect()
+  })
+  .catch(async (e) => {
+    console.error(e)
+    await prisma.$disconnect()
+    process.exit(1)
+  })

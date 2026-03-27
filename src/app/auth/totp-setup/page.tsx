@@ -6,6 +6,9 @@ export default function TotpSetupPage() {
   const [qrCode, setQrCode] = useState('')
   const [secret, setSecret] = useState('')
   const [token, setToken] = useState('')
+
+  const userId = 'demo'
+
   const [verifyResult, setVerifyResult] = useState('')
   const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -60,7 +63,27 @@ export default function TotpSetupPage() {
         return
       }
 
-      setVerifyResult(data.data.isValid ? 'Valid code ✅' : 'Invalid code ❌')
+      if (data.data.isValid) {
+        const enableRes = await fetch('/api/auth/totp/enable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId,
+            secret,
+          }),
+        })
+
+        const enableData = await enableRes.json()
+
+        if (!enableData.success) {
+          setError(enableData.error || 'Failed to enable 2FA')
+          return
+        }
+
+        setVerifyResult('Valid code ✅ 2FA enabled successfully')
+      } else {
+        setVerifyResult('Invalid code ❌')
+      }
     } catch {
       setError('Something went wrong')
     } finally {
