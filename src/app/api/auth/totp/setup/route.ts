@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { authenticator } from 'otplib'
+import * as OTPAuth from 'otplib'
 import QRCode from 'qrcode'
 
 export async function POST() {
   try {
-    const secret = authenticator.generateSecret()
+    const secret = OTPAuth.authenticator.generateSecret()
 
-    const otpauth = authenticator.keyuri(
+    const otpauth = OTPAuth.authenticator.keyuri(
       'demo@emailflow.ai',
       'EmailFlow AI',
       secret

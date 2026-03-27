@@ -38,9 +38,9 @@ export async function POST(req: Request) {
         )
       }
 
-      const { authenticator } = await import('otplib')
+      const OTPAuth = await import('otplib')
 
-      const isValid = authenticator.verify({
+      const isValid = OTPAuth.authenticator.verify({
         token: totpCode,
         secret: user.totpSecret!,
       })
