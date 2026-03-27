@@ -5,7 +5,7 @@ import { createToken, setSessionCookie } from '@/lib/auth-token'
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json()
+    const { email, password, totpCode } = await req.json()
 
     if (!email || !password) {
       return NextResponse.json(
@@ -28,6 +28,29 @@ export async function POST(req: Request) {
         { success: false, error: 'Invalid email or password' },
         { status: 401 }
       )
+    }
+    // 2FA
+    if (user.totpEnabled) {
+      if (!totpCode) {
+        return NextResponse.json(
+          { success: false, error: 'Authenticator code required' },
+          { status: 401 }
+        )
+      }
+
+      const { authenticator } = await import('otplib')
+
+      const isValid = authenticator.verify({
+        token: totpCode,
+        secret: user.totpSecret!,
+      })
+
+      if (!isValid) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid authenticator code' },
+          { status: 401 }
+        )
+      }
     }
 
     const token = createToken({ userId: user.id, email: user.email })
