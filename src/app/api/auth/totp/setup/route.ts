@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
-import * as OTPAuth from 'otplib'
+import { generateSecret, generateURI } from 'otplib'
 import QRCode from 'qrcode'
 
 export async function POST() {
   try {
-    const secret = OTPAuth.authenticator.generateSecret()
+    const secret = generateSecret()
 
-    const otpauth = OTPAuth.authenticator.keyuri(
-      'demo@emailflow.ai',
-      'EmailFlow AI',
-      secret
-    )
+    const uri = generateURI({
+      issuer: 'EmailFlow AI',
+      label: 'demo@emailflow.ai',
+      secret,
+    })
 
-    const qrCodeDataUrl = await QRCode.toDataURL(otpauth)
+    const qrCodeDataUrl = await QRCode.toDataURL(uri)
 
     return NextResponse.json({
       success: true,
