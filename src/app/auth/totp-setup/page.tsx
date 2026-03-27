@@ -12,6 +12,25 @@ export default function TotpSetupPage() {
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    async function loadMe() {
+      try {
+        const res = await fetch('/api/auth/me')
+        const data = await res.json()
+
+        if (data.success) {
+          setUserId(data.data.userId)
+        } else {
+          setError(data.error || 'No logged-in user found')
+        }
+      } catch {
+        setError('Failed to load current user')
+      }
+    }
+
+    loadMe()
+  }, [])
+
   async function handleGenerate() {
     setLoading(true)
     setError('')
@@ -37,23 +56,6 @@ export default function TotpSetupPage() {
     } finally {
       setLoading(false)
     }
-
-    useEffect(() => {
-      async function loadMe() {
-        try {
-          const res = await fetch('/api/auth/me')
-          const data = await res.json()
-
-          if (data.success) {
-            setUserId(data.data.userId)
-          }
-        } catch {
-          // ignore for now
-        }
-      }
-
-      loadMe()
-    }, [])
   }
 
   async function handleVerify() {
@@ -79,10 +81,10 @@ export default function TotpSetupPage() {
       }
 
       if (data.data.isValid) {
-          if (!userId) {
-            setError('No logged-in user found')
-            return
-          }
+        if (!userId) {
+          setError('No logged-in user found')
+          return
+        }
 
         const enableRes = await fetch('/api/auth/totp/enable', {
           method: 'POST',
