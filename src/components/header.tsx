@@ -17,11 +17,25 @@ export function Header() {
   const queryClient = useQueryClient()
 
   const syncMutation = useMutation({
-    mutationFn: () => fetch('/api/sync', { method: 'POST' }).then((r) => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['emails'] })
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
+    mutationFn: async () => {
+      const res = await fetch('/api/sync', { method: 'POST' })
+      const data = await res.json()
+
+      if (!res.ok || !data.success) {
+        throw new Error(data?.error || 'Sync failed')
+      }
+
+      return data
+    },
+
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['stats'] })
+      await queryClient.refetchQueries({ queryKey: ['stats'] })
+    },
+
+    onError: (err) => {
+      console.error('Sync failed:', err)
+      alert('Sync failed')
     },
   })
 
@@ -35,14 +49,17 @@ export function Header() {
           onClick={() => syncMutation.mutate()}
           disabled={syncMutation.isPending}
         >
-          <RefreshCw className={cn('mr-2 h-3.5 w-3.5', syncMutation.isPending && 'animate-spin')} />
+          <RefreshCw
+            className={cn(
+              'mr-2 h-3.5 w-3.5',
+              syncMutation.isPending && 'animate-spin'
+            )}
+          />
           {syncMutation.isPending ? 'Syncing...' : 'Sync'}
         </Button>
 
         <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100"
-          >
+          <DropdownMenuTrigger className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100">
             <User className="h-4 w-4" />
             <span>{user?.name || 'User'}</span>
           </DropdownMenuTrigger>
