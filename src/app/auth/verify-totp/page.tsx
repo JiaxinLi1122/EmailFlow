@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+export const dynamic = 'force-dynamic'
+
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Zap, Loader2 } from 'lucide-react'
 
-export default function VerifyTotpPage() {
+function VerifyTotpContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tempToken = searchParams.get('token') || ''
@@ -105,5 +107,13 @@ export default function VerifyTotpPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function VerifyTotpPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center">Loading...</div>}>
+      <VerifyTotpContent />
+    </Suspense>
   )
 }
