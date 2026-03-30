@@ -70,12 +70,30 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    const profileData = await profileRes.json()
+
+    if (!profileRes.ok) {
+      console.error('[google callback] failed to fetch user info:', profileData)
+      return NextResponse.redirect(
+        new URL('/dashboard?gmail_error=userinfo_failed', APP_URL)
+      )
+    }
+
+    const gmailEmail = profileData.email as string | undefined
+
     const expiryDate =
       typeof expiresIn === 'number'
         ? new Date(Date.now() + expiresIn * 1000)
         : null
 
     const updateData: {
+      gmailEmail?: string
       gmailAccessToken: string
       gmailConnected: boolean
       gmailTokenExpiry?: Date | null
@@ -84,6 +102,10 @@ export async function GET(req: NextRequest) {
       gmailAccessToken: accessToken,
       gmailConnected: true,
       gmailTokenExpiry: expiryDate,
+    }
+
+    if (gmailEmail) {
+      updateData.gmailEmail = gmailEmail
     }
 
     if (refreshToken) {

@@ -11,19 +11,50 @@ import { toast } from 'sonner'
 
 export default function SettingsPage() {
   const { user, logout } = useAuth()
+  const queryClient = useQueryClient()
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
   })
 
+  const { data: meRes } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => fetch('/api/auth/me').then((r) => r.json()),
+  })
+
   const s = stats?.data?.sync
+  const gmailConnected = !!s?.gmailConnected
+  const currentUser = meRes?.user || meRes?.data || null
+  const connectedGmail = currentUser?.gmailEmail || null
+
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/auth/google/disconnect', {
+        method: 'POST',
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json?.error || 'Disconnect failed')
+      }
+
+      return json
+    },
+    onSuccess: () => {
+      toast.success('Gmail disconnected')
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Disconnect failed')
+    },
+  })
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
-      {/* Account */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Account</CardTitle>
@@ -42,7 +73,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Email connections */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -51,20 +81,48 @@ export default function SettingsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm">Gmail</p>
+              <p className="text-sm font-medium">Gmail</p>
               <p className="text-xs text-gray-500">
-                {s?.lastSyncAt
-                  ? `Last synced: ${new Date(s.lastSyncAt).toLocaleString()}`
+                {gmailConnected
+                  ? (connectedGmail || 'Connected Gmail')
                   : 'Not connected'}
               </p>
+              <p className="text-xs text-gray-400">
+                {s?.lastSyncAt
+                  ? `Last synced: ${new Date(s.lastSyncAt).toLocaleString()}`
+                  : gmailConnected
+                    ? 'Connected'
+                    : 'No sync yet'}
+              </p>
             </div>
-            <Badge variant={s?.gmailConnected ? 'default' : 'outline'}>
-              {s?.gmailConnected ? 'Connected' : 'Not Connected'}
-            </Badge>
+
+            <div className="flex items-center gap-2">
+              <Badge variant={gmailConnected ? 'default' : 'outline'}>
+                {gmailConnected ? 'Connected' : 'Not Connected'}
+              </Badge>
+
+              {gmailConnected ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  onClick={() => disconnectMutation.mutate()}
+                  disabled={disconnectMutation.isPending}
+                >
+                  {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+                </Button>
+              ) : (
+                <a href="/api/auth/google">
+                  <Button size="sm">Connect Gmail</Button>
+                </a>
+              )}
+            </div>
           </div>
+
           <Separator />
+
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm">Outlook</p>
@@ -72,13 +130,13 @@ export default function SettingsPage() {
             </div>
             <Badge variant="outline">Not Connected</Badge>
           </div>
+
           <p className="text-[11px] text-gray-400">
             Connect your email accounts to sync and classify emails. You can connect multiple providers.
           </p>
         </CardContent>
       </Card>
 
-      {/* Privacy */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -97,7 +155,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Danger zone */}
       <Card className="border-red-200">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base text-red-600">
@@ -113,9 +170,10 @@ export default function SettingsPage() {
           <Button
             variant="outline"
             className="border-red-200 text-red-600 hover:bg-red-50"
-            onClick={() => toast.info('Disconnect feature coming soon')}
+            onClick={() => disconnectMutation.mutate()}
+            disabled={disconnectMutation.isPending || !gmailConnected}
           >
-            Disconnect All
+            {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect Gmail'}
           </Button>
         </CardContent>
       </Card>

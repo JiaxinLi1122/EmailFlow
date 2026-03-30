@@ -18,6 +18,7 @@ model User {
   totpEnabled Boolean @default(false)
   totpSecret  String?
 
+  gmailEmail        String?
   gmailAccessToken  String?
   gmailRefreshToken String?
   gmailTokenExpiry  DateTime?
