@@ -1,15 +1,15 @@
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI
-
-if (!GOOGLE_CLIENT_ID) {
-  throw new Error('Missing GOOGLE_CLIENT_ID')
-}
-
-if (!GOOGLE_REDIRECT_URI) {
-  throw new Error('Missing GOOGLE_REDIRECT_URI')
-}
-
 export function getGoogleOAuthUrl() {
+  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
+  const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI
+
+  if (!GOOGLE_CLIENT_ID) {
+    throw new Error('Missing GOOGLE_CLIENT_ID')
+  }
+
+  if (!GOOGLE_REDIRECT_URI) {
+    throw new Error('Missing GOOGLE_REDIRECT_URI')
+  }
+
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: GOOGLE_REDIRECT_URI,
