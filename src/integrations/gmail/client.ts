@@ -109,15 +109,33 @@ function mapGmailLabelsToCategories(labels: string[]): NormalizedCategory[] {
 export const gmailProvider: EmailProvider = {
   name: 'gmail',
 
-  async fetchNewEmails(userId: string, sinceDays: number = 7): Promise<EmailMessage[]> {
+  async fetchNewEmails(userId: string): Promise<EmailMessage[]> {
     const auth = await getAuthenticatedClient(userId)
     const gmail = google.gmail({ version: 'v1', auth })
 
-    const afterDate = new Date()
-    afterDate.setDate(afterDate.getDate() - sinceDays)
-    const afterStr = Math.floor(afterDate.getTime() / 1000).toString()
+    // 读取 syncStartDate
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { syncStartDate: true },
+    })
 
-    // Get existing message IDs to avoid duplicates
+    let startDate = user?.syncStartDate
+
+    // 如果没有 → 默认 15 天
+    if (!startDate) {
+      startDate = new Date()
+      startDate.setDate(startDate.getDate() - 15)
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: { syncStartDate: startDate },
+      })
+    }
+
+    // 转换为 Gmail after 参数（秒级时间戳）
+    const afterStr = Math.floor(startDate.getTime() / 1000).toString()
+
+    // 去重
     const existingIds = new Set(
       (
         await prisma.email.findMany({
@@ -127,6 +145,7 @@ export const gmailProvider: EmailProvider = {
       ).map((e) => e.gmailMessageId)
     )
 
+    // 拉取邮件（带时间过滤）
     const listRes = await gmail.users.messages.list({
       userId: 'me',
       q: `after:${afterStr}`,
@@ -144,6 +163,7 @@ export const gmailProvider: EmailProvider = {
 
     for (let i = 0; i < messageIds.length; i += batchSize) {
       const batch = messageIds.slice(i, i + batchSize)
+
       const results = await Promise.all(
         batch.map(async (msgId) => {
           try {
@@ -173,11 +193,10 @@ export const gmailProvider: EmailProvider = {
         const receivedAt = dateStr ? new Date(dateStr) : new Date()
 
         const recipients = [to, cc].filter(Boolean)
-        const hasAttachments = !!(msg.payload.parts?.some(
-          (p: any) => p.filename && p.filename.length > 0
-        ))
+        const hasAttachments = !!(
+          msg.payload.parts?.some((p: any) => p.filename && p.filename.length > 0)
+        )
 
-        // Map Gmail labels to normalized categories
         const gmailLabels = msg.labelIds || []
         const providerCategories = mapGmailLabelsToCategories(gmailLabels)
 
@@ -198,7 +217,7 @@ export const gmailProvider: EmailProvider = {
     }
 
     return messages
-  },
+  }
 
   async disconnect(userId: string): Promise<void> {
     const user = await prisma.user.findUnique({

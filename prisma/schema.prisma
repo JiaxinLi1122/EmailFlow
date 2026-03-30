@@ -24,6 +24,7 @@ model User {
   gmailTokenExpiry  DateTime?
   gmailConnected    Boolean   @default(false)
 
+  syncStartDate DateTime?
   lastSyncAt  DateTime?
   syncEnabled Boolean   @default(true)
 
