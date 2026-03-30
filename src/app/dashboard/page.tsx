@@ -75,9 +75,18 @@ export default function DashboardPage() {
 
   return (
     <div className="animate-in fade-in space-y-6 duration-200">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500">Your email-to-task command center</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500">Your email-to-task command center</p>
+        </div>
+
+        <a
+          href="/api/auth/google"
+          className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+        >
+          Connect Gmail
+        </a>
       </div>
 
       {/* Top stat cards */}
