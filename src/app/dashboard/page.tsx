@@ -81,12 +81,18 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-500">Your email-to-task command center</p>
         </div>
 
-        <a
-          href="/api/auth/google"
-          className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
-        >
-          Connect Gmail
-        </a>
+        {s?.sync?.gmailConnected ? (
+          <span className="inline-flex items-center rounded-lg bg-green-100 px-4 py-2 text-sm font-medium text-green-700">
+            Connected
+          </span>
+        ) : (
+          <a
+            href="/api/auth/google"
+            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+          >
+            Connect Gmail
+          </a>
+        )}
       </div>
 
       {/* Top stat cards */}
