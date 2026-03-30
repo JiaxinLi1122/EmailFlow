@@ -217,7 +217,7 @@ export const gmailProvider: EmailProvider = {
     }
 
     return messages
-  }
+  },
 
   async disconnect(userId: string): Promise<void> {
     const user = await prisma.user.findUnique({
