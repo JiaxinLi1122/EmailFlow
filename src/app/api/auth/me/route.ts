@@ -29,6 +29,7 @@ export async function GET() {
         email: true,
         name: true,
         gmailEmail: true,
+        syncStartDate: true,
       },
     })
 
@@ -46,6 +47,7 @@ export async function GET() {
         email: user.email,
         name: user.name,
         gmailEmail: user.gmailEmail,
+        syncStartDate: user.syncStartDate,
       },
     })
   } catch (err) {

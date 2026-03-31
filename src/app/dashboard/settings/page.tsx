@@ -28,6 +28,15 @@ export default function SettingsPage() {
   const currentUser = meRes?.user || meRes?.data || null
   const connectedGmail = currentUser?.gmailEmail || null
 
+  const syncStartDate = currentUser?.syncStartDate
+
+  let currentDays: number | null = null
+
+  if (syncStartDate) {
+    const diff = Date.now() - new Date(syncStartDate).getTime()
+    currentDays = Math.round(diff / (1000 * 60 * 60 * 24))
+  }
+
   const disconnectMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch('/api/auth/google/disconnect', {
@@ -48,6 +57,32 @@ export default function SettingsPage() {
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Disconnect failed')
+    },
+  })
+
+  const syncRangeMutation = useMutation({
+    mutationFn: async (days: number) => {
+      const res = await fetch('/api/settings/sync-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json?.error || 'Failed to update sync range')
+      }
+
+      return json
+    },
+    onSuccess: () => {
+      toast.success('Sync range updated')
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to update sync range')
     },
   })
 
@@ -133,6 +168,39 @@ export default function SettingsPage() {
 
           <p className="text-[11px] text-gray-400">
             Connect your email accounts to sync and classify emails. You can connect multiple providers.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Email Sync Window</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <p className="text-sm font-medium">Choose how far back to sync emails</p>
+            <p className="text-xs text-gray-500">
+              Default is 15 days. Changing to an earlier date lets you backfill older emails on the next sync.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {[7, 15, 30, 90].map((days) => (
+              <Button
+                key={days}
+                type="button"
+                variant={currentDays === days ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => syncRangeMutation.mutate(days)}
+                disabled={syncRangeMutation.isPending}
+              >
+                {days} days
+              </Button>
+            ))}
+          </div>
+
+          <p className="text-[11px] text-gray-400">
+            After updating this setting, click Sync to fetch emails from the new range.
           </p>
         </CardContent>
       </Card>
