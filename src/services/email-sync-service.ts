@@ -42,14 +42,21 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
 
     for (const email of storedEmails) {
       try {
-        const result = await processEmail(email.id, userId)
+        const result = await processEmail(userId, {
+          id: email.id,
+          subject: email.subject,
+          sender: email.sender,
+          receivedAt: email.receivedAt,
+          bodyPreview: email.bodyPreview,
+          bodyFull: email.bodyFull,
+          labels: email.labels,
+        })
 
         if (result?.taskCreated) {
           tasksCreated += 1
         }
       } catch (err) {
         console.error(`Failed to process email ${email.id}:`, err)
-        // 不让单封邮件处理失败影响整个 sync
       }
     }
 
