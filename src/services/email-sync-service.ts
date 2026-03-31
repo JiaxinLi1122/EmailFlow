@@ -42,7 +42,7 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
 
     for (const email of storedEmails) {
       try {
-        const result = await processEmail(email)
+        const result = await processEmail(email, userId)
 
         if (result?.taskCreated) {
           tasksCreated += 1
