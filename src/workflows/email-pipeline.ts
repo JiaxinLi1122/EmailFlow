@@ -165,8 +165,8 @@ export async function processEmail(
   // Step 1: Classify with AI
   const classification = await stepClassify(email)
 
-  // Only extract tasks for action/uncertain emails
-  if (classification.category !== 'action' && classification.category !== 'uncertain') {
+  // Only extract tasks for clear action emails
+  if (classification.category !== 'action') {
     return {
       emailId: email.id,
       classification: classification.category,

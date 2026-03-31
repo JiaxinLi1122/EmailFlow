@@ -20,10 +20,13 @@ export async function createTask(data: CreateTaskData) {
       summary: data.extraction.summary,
       actionItems: JSON.stringify(data.extraction.actionItems),
       status: 'pending',
+      source: 'ai_auto',
+
       urgency: data.priority.urgency,
       impact: data.priority.impact,
       priorityScore: data.priority.combinedScore,
       priorityReason: data.priority.reasoning,
+
       explicitDeadline: data.extraction.explicitDeadline
         ? new Date(data.extraction.explicitDeadline)
         : null,
