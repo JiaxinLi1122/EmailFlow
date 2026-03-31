@@ -67,7 +67,7 @@ function stepPreFilter(email: {
 }
 
 /**
- * Step 1: Classify an email using AI (with cleaned, short body)
+ * Step 1: Classify an email using AI (with cleaned body)
  */
 async function stepClassify(email: {
   id: string
@@ -75,9 +75,11 @@ async function stepClassify(email: {
   sender: string
   receivedAt: Date
   bodyPreview: string
+  bodyFull: string | null
 }) {
-  // Use short, cleaned body for classification — 500 chars is enough to judge intent
-  const cleanedBody = prepareForClassification(email.bodyPreview)
+  // Use full body when available, fallback to preview
+  const rawBody = email.bodyFull || email.bodyPreview
+  const cleanedBody = prepareForClassification(rawBody)
 
   const result = await classifyEmail({
     subject: email.subject,
