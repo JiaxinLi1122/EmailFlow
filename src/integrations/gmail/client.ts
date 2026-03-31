@@ -109,7 +109,7 @@ function mapGmailLabelsToCategories(labels: string[]): NormalizedCategory[] {
 export const gmailProvider: EmailProvider = {
   name: 'gmail',
 
-  async fetchNewEmails(userId: string): Promise<EmailMessage[]> {
+  async fetchNewEmails(userId: string, _sinceDays: number = 7): Promise<EmailMessage[]> {
     const auth = await getAuthenticatedClient(userId)
     const gmail = google.gmail({ version: 'v1', auth })
 

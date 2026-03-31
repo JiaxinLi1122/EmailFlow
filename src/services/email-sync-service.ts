@@ -5,19 +5,63 @@ import * as userRepo from '@/repositories/user-repo'
 
 // ============================================================
 // Email Sync Service
-// Thin orchestrator: fetch emails → store → run pipeline on each
-// All AI logic lives in workflows/email-pipeline.ts
-// All DB logic lives in repositories/
+// Fetch emails → store → run pipeline on each → update sync time
 // ============================================================
 
 export async function syncEmails(userId: string, sinceDays: number = 7) {
   try {
-    // ⭐ 临时跳过 Gmail，避免报错
+    const syncInfo = await userRepo.getUserSyncInfo(userId)
+
+    if (!syncInfo) {
+      throw new Error('User not found')
+    }
+
+    if (!syncInfo.gmailConnected) {
+      throw new Error('Gmail not connected')
+    }
+
+    if (!syncInfo.syncEnabled) {
+      throw new Error('Email sync is disabled')
+    }
+
+    // 1) Fetch new emails from Gmail
+    const messages = await gmailProvider.fetchNewEmails(userId, sinceDays)
+
+    if (messages.length === 0) {
+      await userRepo.updateLastSync(userId)
+      return { synced: 0, tasks: 0 }
+    }
+
+    // 2) Store emails first
+    const storedEmails = await Promise.all(
+      messages.map((message) => emailRepo.storeEmail({ userId, message }))
+    )
+
+    // 3) Run email processing pipeline on each stored email
+    let tasksCreated = 0
+
+    for (const email of storedEmails) {
+      try {
+        const result = await processEmail(email)
+
+        if (result?.taskCreated) {
+          tasksCreated += 1
+        }
+      } catch (err) {
+        console.error(`Failed to process email ${email.id}:`, err)
+        // 不让单封邮件处理失败影响整个 sync
+      }
+    }
+
+    // 4) Update last sync time
     await userRepo.updateLastSync(userId)
 
-    return { synced: 0, tasks: 0 }
+    return {
+      synced: storedEmails.length,
+      tasks: tasksCreated,
+    }
   } catch (err) {
-    console.error(err)
+    console.error('syncEmails failed:', err)
     throw err
   }
 }
