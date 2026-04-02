@@ -49,7 +49,7 @@ function VerifyTotpContent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="animate-fade-in-up stagger-1 mb-8 text-center">
           <Link href="/landing" className="inline-flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600">
               <Zap className="h-5 w-5 text-white" />
@@ -61,7 +61,7 @@ function VerifyTotpContent() {
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-xl border bg-white p-6 shadow-sm"
+          className="animate-scale-in stagger-2 space-y-4 rounded-xl border bg-white p-6 shadow-sm"
         >
           <div className="text-sm text-gray-600">
             Enter the 6-digit code from your authenticator app.
@@ -92,7 +92,7 @@ function VerifyTotpContent() {
           <button
             type="submit"
             disabled={loading || !tempToken}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-700 hover:shadow-md disabled:opacity-50 active:scale-[0.98]"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Verify

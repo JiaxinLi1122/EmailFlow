@@ -2,11 +2,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Zap, Loader2, Eye, EyeOff } from 'lucide-react'
 
 export default function SignInPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -37,6 +39,7 @@ export default function SignInPage() {
         return
       }
 
+      queryClient.invalidateQueries({ queryKey: ['auth-user'] })
       router.push('/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')
@@ -48,7 +51,7 @@ export default function SignInPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="animate-fade-in-up stagger-1 mb-8 text-center">
           <Link href="/landing" className="inline-flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600">
               <Zap className="h-5 w-5 text-white" />
@@ -60,10 +63,10 @@ export default function SignInPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-xl border bg-white p-6 shadow-sm"
+          className="animate-scale-in stagger-2 space-y-4 rounded-xl border bg-white p-6 shadow-sm"
         >
           {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+            <div className="animate-fade-in rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
               {error}
             </div>
           )}
@@ -78,7 +81,7 @@ export default function SignInPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
-              className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-shadow"
             />
           </div>
 
@@ -93,7 +96,7 @@ export default function SignInPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
                 required
-                className="w-full rounded-lg border px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-lg border px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-shadow"
               />
               <button
                 type="button"
@@ -113,14 +116,14 @@ export default function SignInPage() {
           <button
             type="submit"
             disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-700 hover:shadow-md disabled:opacity-50 active:scale-[0.98]"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Log in
           </button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-gray-500">
+        <p className="animate-fade-in-up stagger-3 mt-4 text-center text-sm text-gray-500">
           Don&apos;t have an account?{' '}
           <Link href="/auth/signup" className="text-blue-600 hover:underline">
             Sign up

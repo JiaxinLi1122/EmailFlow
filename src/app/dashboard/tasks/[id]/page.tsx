@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import {
   ArrowLeft, Mail, Save, Calendar, TrendingUp, ExternalLink,
   CheckCircle2, ListChecks, FileText, Clock, Sparkles, ThumbsUp,
-  X, Check, AlertTriangle, Shield, RotateCcw, Square, CheckSquare,
+  X, Check, AlertTriangle, Shield, RotateCcw, Square, CheckSquare, Plus,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
@@ -56,6 +56,71 @@ function generateId(): string {
   return `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+// 获取某项的子任务（下一级）
+function getDirectChildren(items: ChecklistItem[], parentId: string): ChecklistItem[] {
+  const parentIndex = items.findIndex(i => i.id === parentId)
+  if (parentIndex < 0) return []
+
+  const parent = items[parentIndex]
+  const children: ChecklistItem[] = []
+
+  for (let i = parentIndex + 1; i < items.length; i++) {
+    if (items[i].level === parent.level + 1) {
+      children.push(items[i])
+    } else if (items[i].level <= parent.level) {
+      break
+    }
+  }
+
+  return children
+}
+
+// 判断是否有子任务
+function hasChildren(items: ChecklistItem[], itemId: string): boolean {
+  const itemIndex = items.findIndex(i => i.id === itemId)
+  if (itemIndex < 0 || itemIndex >= items.length - 1) return false
+
+  const item = items[itemIndex]
+  // 检查后续是否有子级（level > item.level，且是第一个这样的项）
+  for (let i = itemIndex + 1; i < items.length; i++) {
+    if (items[i].level > item.level) {
+      return true
+    } else if (items[i].level <= item.level) {
+      return false
+    }
+  }
+  return false
+}
+
+// 删除项目及其所有后代
+function deleteItemWithChildren(items: ChecklistItem[], itemId: string): ChecklistItem[] {
+  const itemIndex = items.findIndex(i => i.id === itemId)
+  if (itemIndex < 0) return items
+
+  const item = items[itemIndex]
+  const result = [...items]
+  let deleteCount = 1
+
+  for (let i = itemIndex + 1; i < items.length; i++) {
+    if (items[i].level <= item.level) break
+    deleteCount++
+  }
+
+  result.splice(itemIndex, deleteCount)
+  return result
+}
+
+// 检查所有子任务是否完成（递归）
+function areAllChildrenCompleted(items: ChecklistItem[], itemId: string): boolean {
+  const children = getDirectChildren(items, itemId)
+  if (children.length === 0) return true
+
+  return children.every(child => {
+    if (!child.completed) return false
+    return areAllChildrenCompleted(items, child.id)
+  })
+}
+
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: typeof CheckCircle2 }> = {
   pending: { label: 'Needs Review', color: 'bg-purple-50 text-purple-700 border-purple-200', bg: 'from-purple-50/50 to-white', icon: AlertTriangle },
   confirmed: { label: 'Confirmed', color: 'bg-blue-50 text-blue-700 border-blue-200', bg: 'from-blue-50/50 to-white', icon: ThumbsUp },
@@ -83,9 +148,11 @@ export default function TaskDetailPage() {
   const [editImpact, setEditImpact] = useState(3)
   const [editNotes, setEditNotes] = useState('')
   const [editStatus, setEditStatus] = useState('pending')
-  const [isEditing, setIsEditing] = useState(false)
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [unlinkingEmailId, setUnlinkingEmailId] = useState<string | null>(null)
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
+  const [editingField, setEditingField] = useState<string | null>(null)
 
   useEffect(() => {
     if (task) {
@@ -106,10 +173,20 @@ export default function TaskDetailPage() {
       try {
         const checked = JSON.parse(task.checkedActionItems || '[]')
         const checkedSet = new Set(Array.isArray(checked) ? checked : [])
-        setChecklistItems(items.map(item => ({
+        const itemsWithStatus = items.map(item => ({
           ...item,
           completed: checkedSet.has(item.id)
-        })))
+        }))
+        setChecklistItems(itemsWithStatus)
+
+        // 默认展开所有有子任务的项目
+        const expandedByDefault = new Set<string>()
+        itemsWithStatus.forEach((item, idx) => {
+          if (hasChildren(itemsWithStatus, item.id)) {
+            expandedByDefault.add(item.id)
+          }
+        })
+        setExpandedItems(expandedByDefault)
       } catch {
         setChecklistItems(items)
       }
@@ -143,8 +220,7 @@ export default function TaskDetailPage() {
       },
       {
         onSuccess: () => {
-          toast.success('Task saved')
-          setIsEditing(false)
+          toast.success('Changes saved')
         },
       }
     )
@@ -163,19 +239,35 @@ export default function TaskDetailPage() {
     )
   }
 
-  const saveChecklist = () => {
-    const checkedIds = checklistItems.filter(item => item.completed).map(item => item.id)
+  const autoSaveChecklist = (items: ChecklistItem[]) => {
+    const checkedIds = items.filter(item => item.completed).map(item => item.id)
     updateTask.mutate({
-      actionItems: JSON.stringify(checklistItems),
+      actionItems: JSON.stringify(items),
       checkedActionItems: JSON.stringify(checkedIds)
     })
   }
 
   const toggleCheckItem = (id: string) => {
-    const next = checklistItems.map(item =>
+    let next = checklistItems.map(item =>
       item.id === id ? { ...item, completed: !item.completed } : item
     )
+
+    // 自动完成父任务：如果所有子任务都完成，父任务也标记为完成
+    const item = next.find(i => i.id === id)
+    if (item?.completed) {
+      // 向上查找所有父任务，逐级检查是否应该自动完成
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i].level < item.level) {
+          const parent = next[i]
+          if (!parent.completed && areAllChildrenCompleted(next, parent.id)) {
+            next = next.map(it => it.id === parent.id ? { ...it, completed: true } : it)
+          }
+        }
+      }
+    }
+
     setChecklistItems(next)
+    autoSaveChecklist(next)
   }
 
   const updateItemText = (id: string, text: string) => {
@@ -183,11 +275,33 @@ export default function TaskDetailPage() {
       item.id === id ? { ...item, text } : item
     )
     setChecklistItems(next)
+    autoSaveChecklist(next)
   }
 
   const deleteItem = (id: string) => {
-    const next = checklistItems.filter(item => item.id !== id)
+    const next = deleteItemWithChildren(checklistItems, id)
     setChecklistItems(next)
+    autoSaveChecklist(next)
+
+    // Clean up expandedItems when deleting an item and its children
+    const deletedIds = new Set<string>()
+    const itemIndex = checklistItems.findIndex(i => i.id === id)
+    if (itemIndex >= 0) {
+      const item = checklistItems[itemIndex]
+      deletedIds.add(id)
+      // Find all children that will be deleted
+      for (let i = itemIndex + 1; i < checklistItems.length; i++) {
+        if (checklistItems[i].level <= item.level) break
+        deletedIds.add(checklistItems[i].id)
+      }
+    }
+
+    // Remove deleted items from expandedItems
+    if (deletedIds.size > 0) {
+      const newExpandedItems = new Set(expandedItems)
+      deletedIds.forEach(id => newExpandedItems.delete(id))
+      setExpandedItems(newExpandedItems)
+    }
   }
 
   const addItem = (parentId?: string) => {
@@ -202,14 +316,16 @@ export default function TaskDetailPage() {
       completed: false,
     }
 
+    let next: ChecklistItem[]
     if (parentIndex >= 0) {
       // Insert after parent
-      const next = [...checklistItems]
+      next = [...checklistItems]
       next.splice(parentIndex + 1, 0, newItem)
-      setChecklistItems(next)
     } else {
-      setChecklistItems([...checklistItems, newItem])
+      next = [...checklistItems, newItem]
     }
+    setChecklistItems(next)
+    autoSaveChecklist(next)
     setEditingItemId(newItem.id)
   }
 
@@ -218,22 +334,49 @@ export default function TaskDetailPage() {
       item.id === id && item.level > 0 ? { ...item, level: item.level - 1 } : item
     )
     setChecklistItems(next)
+    autoSaveChecklist(next)
   }
 
   const indentItem = (id: string) => {
     const itemIndex = checklistItems.findIndex(i => i.id === id)
     if (itemIndex <= 0) return
 
+    const item = checklistItems[itemIndex]
     const prevItem = checklistItems[itemIndex - 1]
-    const next = checklistItems.map((item, idx) =>
-      idx === itemIndex ? { ...item, level: prevItem.level + 1 } : item
+
+    // 只能变成前一项的下一级，且最多到level 2
+    const newLevel = prevItem.level + 1
+    if (newLevel > 2) return
+
+    const next = checklistItems.map((i, idx) =>
+      idx === itemIndex ? { ...i, level: newLevel } : i
     )
     setChecklistItems(next)
+    autoSaveChecklist(next)
+  }
+
+  const unlinkEmail = async (emailId: string) => {
+    setUnlinkingEmailId(emailId)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/emails/${emailId}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+        toast.success('Email unlinked')
+      } else {
+        toast.error('Failed to unlink email')
+      }
+    } catch (err) {
+      toast.error('Failed to unlink email')
+    } finally {
+      setUnlinkingEmailId(null)
+    }
   }
 
   if (isLoading) {
     return (
-      <div className="animate-in fade-in mx-auto max-w-4xl space-y-4">
+      <div className="animate-in fade-in mx-auto max-w-6xl space-y-4">
         <div className="h-8 w-32 animate-pulse rounded bg-gray-200" />
         <div className="h-64 animate-pulse rounded-xl border bg-gray-100" />
         <div className="h-40 animate-pulse rounded-xl border bg-gray-100" />
@@ -243,7 +386,7 @@ export default function TaskDetailPage() {
 
   if (!task) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 mb-4">
           <ArrowLeft className="h-4 w-4" />
           Back to tasks
@@ -265,15 +408,14 @@ export default function TaskDetailPage() {
   const isDone = task.status === 'completed' || task.status === 'dismissed'
 
   return (
-    <div className="animate-in fade-in mx-auto max-w-4xl space-y-5 duration-200">
-      {/* Back button */}
-      <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 hover:text-gray-900">
-        <ArrowLeft className="h-4 w-4" />
-        Back to tasks
-      </Button>
-
+    <div className="animate-in fade-in duration-200">
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 hover:text-gray-900 -ml-2">
+          <ArrowLeft className="h-4 w-4" />
+          Back to tasks
+        </Button>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Task content */}
         <div className="lg:col-span-2 space-y-4">
           {/* Header card */}
@@ -368,77 +510,336 @@ export default function TaskDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Edit form — collapsible */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <FileText className="h-4 w-4 text-gray-500" />
-                  Edit Details
-                </CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setIsEditing(!isEditing)} className="text-xs text-gray-500">
-                  {isEditing ? 'Collapse' : 'Expand'}
-                </Button>
-              </div>
+          {/* Task Info */}
+          <Card className={`bg-gradient-to-br ${sts.bg}`}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <FileText className="h-4 w-4" />
+                Task Info
+              </CardTitle>
             </CardHeader>
-            {isEditing && (
-              <CardContent className="space-y-4 pt-2">
-                <div>
-                  <Label htmlFor="title" className="text-xs text-gray-500">Title</Label>
-                  <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="mt-1" />
-                </div>
-                <div>
-                  <Label htmlFor="summary" className="text-xs text-gray-500">Summary</Label>
-                  <Textarea id="summary" value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={3} className="mt-1" />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label htmlFor="deadline" className="text-xs text-gray-500">Deadline</Label>
-                    <Input id="deadline" type="date" value={editDeadline} onChange={(e) => setEditDeadline(e.target.value)} className="mt-1" />
+            <CardContent className="space-y-4">
+              <div className="cursor-text group">
+                <Label className="text-xs text-gray-500">Title</Label>
+                {editingField === 'title' ? (
+                  <div className="mt-1 flex gap-2 items-center">
+                    <Input
+                      autoFocus
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSave()
+                          setEditingField(null)
+                        }
+                        if (e.key === 'Escape') setEditingField(null)
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        handleSave()
+                        setEditingField(null)
+                      }}
+                      disabled={updateTask.isPending}
+                      className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Save"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditTitle(task.title)
+                        setEditingField(null)
+                      }}
+                      disabled={updateTask.isPending}
+                      className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Cancel"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                  <div>
-                    <Label htmlFor="urgency" className="text-xs text-gray-500">Urgency (1-5)</Label>
-                    <Input id="urgency" type="number" min={1} max={5} value={editUrgency} onChange={(e) => setEditUrgency(Number(e.target.value))} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="impact" className="text-xs text-gray-500">Impact (1-5)</Label>
-                    <Input id="impact" type="number" min={1} max={5} value={editImpact} onChange={(e) => setEditImpact(Number(e.target.value))} className="mt-1" />
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="notes" className="text-xs text-gray-500">Your Notes</Label>
-                  <Textarea id="notes" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} placeholder="Add personal notes..." className="mt-1" />
-                </div>
+                ) : (
+                  <p
+                    onClick={() => setEditingField('title')}
+                    className="mt-1 text-sm font-semibold text-gray-900 py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                  >
+                    {task.title}
+                  </p>
+                )}
+              </div>
 
-                {/* Status selector */}
-                <div>
-                  <Label className="text-xs text-gray-500">Status</Label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    {Object.entries(statusConfig).map(([value, opt]) => (
+              <div className="cursor-text group">
+                <Label className="text-xs text-gray-500">Summary</Label>
+                {editingField === 'summary' ? (
+                  <div className="mt-1 flex gap-2">
+                    <Textarea
+                      autoFocus
+                      value={editSummary}
+                      onChange={(e) => setEditSummary(e.target.value)}
+                      rows={3}
+                    />
+                    <div className="flex flex-col gap-2">
                       <button
-                        key={value}
-                        onClick={() => setEditStatus(value)}
-                        className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all ${
-                          editStatus === value
-                            ? `${opt.color} ring-2 ring-offset-1`
-                            : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-                        }`}
+                        onClick={() => {
+                          handleSave()
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Save"
                       >
-                        {opt.label}
+                        <Check className="h-4 w-4" />
                       </button>
-                    ))}
+                      <button
+                        onClick={() => {
+                          setEditSummary(task.summary)
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <p
+                    onClick={() => setEditingField('summary')}
+                    className="mt-1 text-sm text-gray-700 leading-relaxed py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                  >
+                    {task.summary || '—'}
+                  </p>
+                )}
+              </div>
 
-                <div className="flex gap-3 pt-2">
-                  <Button onClick={handleSave} disabled={updateTask.isPending} className="gap-2">
-                    <Save className="h-4 w-4" />
-                    {updateTask.isPending ? 'Saving...' : 'Save Changes'}
-                  </Button>
-                  <Button variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="cursor-text group">
+                  <Label className="text-xs text-gray-500">Deadline</Label>
+                  {editingField === 'deadline' ? (
+                    <div className="mt-1 flex gap-2 items-center">
+                      <Input
+                        autoFocus
+                        type="date"
+                        value={editDeadline}
+                        onChange={(e) => setEditDeadline(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSave()
+                            setEditingField(null)
+                          }
+                          if (e.key === 'Escape') setEditingField(null)
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          handleSave()
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Save"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditDeadline(task.deadline || '')
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      onClick={() => setEditingField('deadline')}
+                      className="mt-1 text-sm font-medium text-gray-700 py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                    >
+                      {deadline ? new Date(deadline).toLocaleDateString() : '—'}
+                    </p>
+                  )}
                 </div>
-              </CardContent>
-            )}
+                <div className="cursor-text group">
+                  <Label className="text-xs text-gray-500">Urgency</Label>
+                  {editingField === 'urgency' ? (
+                    <div className="mt-1 flex gap-2 items-center">
+                      <Input
+                        autoFocus
+                        type="number"
+                        min={1}
+                        max={5}
+                        value={editUrgency}
+                        onChange={(e) => setEditUrgency(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSave()
+                            setEditingField(null)
+                          }
+                          if (e.key === 'Escape') setEditingField(null)
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          handleSave()
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Save"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditUrgency(task.urgency || 3)
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      onClick={() => setEditingField('urgency')}
+                      className="mt-1 text-sm font-medium text-gray-700 py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                    >
+                      {task.urgency || '—'} / 5
+                    </p>
+                  )}
+                </div>
+                <div className="cursor-text group">
+                  <Label className="text-xs text-gray-500">Impact</Label>
+                  {editingField === 'impact' ? (
+                    <div className="mt-1 flex gap-2 items-center">
+                      <Input
+                        autoFocus
+                        type="number"
+                        min={1}
+                        max={5}
+                        value={editImpact}
+                        onChange={(e) => setEditImpact(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSave()
+                            setEditingField(null)
+                          }
+                          if (e.key === 'Escape') setEditingField(null)
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          handleSave()
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Save"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditImpact(task.impact || 3)
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      onClick={() => setEditingField('impact')}
+                      className="mt-1 text-sm font-medium text-gray-700 py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                    >
+                      {task.impact || '—'} / 5
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="cursor-text group">
+                <Label className="text-xs text-gray-500">Your Notes</Label>
+                {editingField === 'notes' ? (
+                  <div className="mt-1 flex gap-2">
+                    <Textarea
+                      autoFocus
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && e.ctrlKey) {
+                          handleSave()
+                          setEditingField(null)
+                        }
+                        if (e.key === 'Escape') setEditingField(null)
+                      }}
+                      rows={2}
+                      placeholder="Add personal notes..."
+                    />
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => {
+                          handleSave()
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Save"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditNotes(task.userNotes || '')
+                          setEditingField(null)
+                        }}
+                        disabled={updateTask.isPending}
+                        className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cancel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p
+                    onClick={() => setEditingField('notes')}
+                    className="mt-1 text-sm text-gray-700 py-2 px-2 -mx-2 rounded group-hover:bg-gray-50 transition-colors"
+                  >
+                    {task.userNotes || '—'}
+                  </p>
+                )}
+              </div>
+
+              <div className="cursor-pointer group">
+                <Label className="text-xs text-gray-500">Status</Label>
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                  {Object.entries(statusConfig).map(([value, opt]) => (
+                    <button
+                      key={value}
+                      onClick={() => handleStatusChange(value)}
+                      disabled={updateTask.isPending}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                        editStatus === value
+                          ? `${opt.color} ring-2 ring-offset-1`
+                          : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
           </Card>
         </div>
 
@@ -463,15 +864,24 @@ export default function TaskDetailPage() {
           {checklistItems.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <ListChecks className="h-4 w-4 text-blue-500" />
-                  Checklist
-                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
-                    {checklistItems.filter(i => i.completed).length}/{checklistItems.length}
-                  </span>
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <ListChecks className="h-4 w-4 text-blue-500" />
+                    Checklist
+                    <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                      {checklistItems.filter(i => i.completed).length}/{checklistItems.length}
+                    </span>
+                  </CardTitle>
+                  <button
+                    onClick={() => addItem()}
+                    className="shrink-0 p-1 rounded-full hover:bg-blue-100 transition-colors text-blue-600 hover:text-blue-700"
+                    title="Add item"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-3 pt-3">
                 {/* Progress bar */}
                 {checklistItems.length > 1 && (
                   <div className="mb-3 h-1.5 rounded-full bg-gray-100 overflow-hidden">
@@ -483,16 +893,72 @@ export default function TaskDetailPage() {
                 )}
 
                 {/* Item list */}
-                <ul className="space-y-1">
-                  {checklistItems.map((item) => {
+                <ul className="space-y-1.5">
+                  {checklistItems.map((item, idx) => {
                     const isEditing = editingItemId === item.id
-                    const indent = `pl-${item.level * 4}`
+                    const isExpanded = expandedItems.has(item.id)
+                    const itemHasChildren = hasChildren(checklistItems, item.id)
+                    const childrenCount = getDirectChildren(checklistItems, item.id).length
+
+                    // 检查是否应该显示这个项目
+                    // 规则：顶层项目或其祖先项目都已展开
+                    const shouldShow = (() => {
+                      if (item.level === 0) return true
+                      // 向上查找所有父项目，检查是否都展开
+                      for (let i = idx - 1; i >= 0; i--) {
+                        const ancestor = checklistItems[i]
+                        if (ancestor.level < item.level) {
+                          // 找到了父级
+                          if (ancestor.level === item.level - 1) {
+                            return expandedItems.has(ancestor.id)
+                          }
+                          // 继续向上找
+                        } else if (ancestor.level === 0) {
+                          // 到顶了，没找到父项
+                          return false
+                        }
+                      }
+                      return false
+                    })()
+
+                    if (!shouldShow) return null
+
                     return (
                       <li
                         key={item.id}
-                        className={`flex items-center gap-2 rounded-lg transition-all hover:bg-gray-50 group ${indent}`}
+                        className={`relative flex items-center gap-2 rounded-lg transition-all hover:bg-gray-50 group`}
                         style={{ paddingLeft: `${item.level * 16}px` }}
                       >
+                        {/* Expand/Collapse button */}
+                        {itemHasChildren && !isEditing ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const next = new Set(expandedItems)
+                              if (next.has(item.id)) {
+                                next.delete(item.id)
+                              } else {
+                                next.add(item.id)
+                              }
+                              setExpandedItems(next)
+                            }}
+                            className="shrink-0 p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-gray-600"
+                            title={isExpanded ? 'Collapse' : 'Expand'}
+                          >
+                            <svg
+                              className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                          </button>
+                        ) : (
+                          <div className="shrink-0 w-6" />
+                        )}
+
                         {/* Checkbox */}
                         <button
                           onClick={() => toggleCheckItem(item.id)}
@@ -530,12 +996,14 @@ export default function TaskDetailPage() {
                               }`}
                             >
                               {item.text || '(empty)'}
+                              {itemHasChildren && <span className="text-xs text-gray-400 ml-1">({childrenCount})</span>}
                             </span>
                           )}
                         </div>
 
                         {/* Action buttons */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {!isEditing && (
+                        <div className="absolute -right-2 top-0 bottom-0 flex items-center gap-0 pr-4 pl-8 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-white via-white via-80% to-transparent z-10">
                           {item.level > 0 && (
                             <button
                               onClick={() => outdentItem(item.id)}
@@ -547,62 +1015,51 @@ export default function TaskDetailPage() {
                               </svg>
                             </button>
                           )}
+                          {idx > 0 && item.level < 2 && checklistItems[idx - 1].level >= item.level && (
+                            <button
+                              onClick={() => indentItem(item.id)}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-gray-600"
+                              title="Indent"
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="9 18 15 12 9 6" />
+                              </svg>
+                            </button>
+                          )}
+                          {item.level < 2 && (
+                            <button
+                              onClick={() => addItem(item.id)}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-blue-600"
+                              title="Add subtask"
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                              </svg>
+                            </button>
+                          )}
                           <button
-                            onClick={() => indentItem(item.id)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-gray-600"
-                            title="Indent"
-                          >
-                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="9 18 15 12 9 6" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => addItem(item.id)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-blue-600"
-                            title="Add subtask"
-                          >
-                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <line x1="12" y1="5" x2="12" y2="19" />
-                              <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => deleteItem(item.id)}
+                            onClick={() => {
+                              const childCount = getDirectChildren(checklistItems, item.id).length
+                              if (childCount > 0) {
+                                if (confirm(`Delete "${item.text}" and its ${childCount} subtask${childCount > 1 ? 's' : ''}?`)) {
+                                  deleteItem(item.id)
+                                }
+                              } else {
+                                deleteItem(item.id)
+                              }
+                            }}
                             className="p-1 hover:bg-red-50 rounded transition-colors text-gray-400 hover:text-red-500"
-                            title="Delete"
+                            title={itemHasChildren ? 'Delete with subtasks' : 'Delete'}
                           >
                             <X className="h-4 w-4" />
                           </button>
                         </div>
+                        )}
                       </li>
                     )
                   })}
                 </ul>
-
-                {/* Add & Save buttons */}
-                <div className="flex gap-2 pt-2 border-t mt-3">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => addItem()}
-                    className="text-xs gap-1.5 h-8"
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                    Add Item
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={saveChecklist}
-                    disabled={updateTask.isPending}
-                    className="text-xs gap-1.5 h-8"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                    {updateTask.isPending ? 'Saving...' : 'Save Checklist'}
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           )}
@@ -621,25 +1078,42 @@ export default function TaskDetailPage() {
                 {task.emailLinks.map((link: any) => {
                   const senderName = link.email.sender?.split('<')[0]?.trim()
                   const senderInitial = (senderName || 'U')[0].toUpperCase()
+                  const isUnlinking = unlinkingEmailId === link.email.id
                   return (
-                    <Link
+                    <div
                       key={link.id}
-                      href={`/dashboard/emails/${link.email.id}`}
-                      className="flex items-center gap-3 rounded-lg border p-3 transition-all hover:bg-blue-50/50 hover:border-blue-200 hover:shadow-sm group"
+                      className="flex items-center gap-3 rounded-lg border p-3 transition-all hover:bg-blue-50/50 hover:border-blue-200 group"
                     >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-xs font-bold">
-                        {senderInitial}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
-                          {link.email.subject}
-                        </p>
-                        <p className="truncate text-xs text-gray-500">
-                          {senderName} — {new Date(link.email.receivedAt).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
-                        </p>
-                      </div>
-                      <ExternalLink className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0 transition-colors" />
-                    </Link>
+                      <Link
+                        href={`/dashboard/emails/${link.email.id}`}
+                        className="flex items-center gap-3 flex-1 min-w-0"
+                      >
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-xs font-bold">
+                          {senderInitial}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                            {link.email.subject}
+                          </p>
+                          <p className="truncate text-xs text-gray-500">
+                            {senderName} — {new Date(link.email.receivedAt).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                          </p>
+                        </div>
+                        <ExternalLink className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0 transition-colors" />
+                      </Link>
+                      <button
+                        onClick={() => {
+                          if (confirm('Remove this email from the task?')) {
+                            unlinkEmail(link.email.id)
+                          }
+                        }}
+                        disabled={isUnlinking}
+                        className="shrink-0 p-1 rounded hover:bg-red-50 transition-colors text-gray-300 hover:text-red-500 disabled:opacity-50"
+                        title="Remove email"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   )
                 })}
               </CardContent>
@@ -689,6 +1163,8 @@ export default function TaskDetailPage() {
               </dl>
             </CardContent>
           </Card>
+
+        </div>
         </div>
       </div>
     </div>

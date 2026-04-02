@@ -7,10 +7,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   ArrowLeft, Mail, Paperclip, Clock, User, ArrowUpRight,
-  CheckSquare, AlertTriangle, Eye, Trash2, Sparkles, Shield,
+  CheckSquare, AlertTriangle, Eye, Trash2, Sparkles, Shield, Plus, Tag, X,
 } from 'lucide-react'
 import Link from 'next/link'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
+import { toast } from 'sonner'
 
 const classConfig: Record<string, { label: string; color: string; bg: string; icon: typeof Mail }> = {
   action: { label: 'Action Required', color: 'bg-red-50 text-red-700 border-red-200', bg: 'from-red-50/50 to-white', icon: CheckSquare },
@@ -22,7 +25,15 @@ const classConfig: Record<string, { label: string; color: string; bg: string; ic
 export default function EmailDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const emailId = params.id as string
+  const [classifying, setClassifying] = useState(false)
+  const [unlinkingTaskId, setUnlinkingTaskId] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [taskTitle, setTaskTitle] = useState('')
+  const [taskSummary, setTaskSummary] = useState('')
+  const [linkedEmailIds, setLinkedEmailIds] = useState<string[]>([])
+  const [creatingTask, setCreatingTask] = useState(false)
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['email', emailId],
@@ -30,6 +41,83 @@ export default function EmailDetailPage() {
   })
 
   const email = res?.data
+
+  const handleClassify = async (newClass: string) => {
+    setClassifying(true)
+    try {
+      const res = await fetch(`/api/emails/${emailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ classification: newClass }),
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ['email', emailId] })
+        queryClient.invalidateQueries({ queryKey: ['emails'] })
+        toast.success(`Marked as ${classConfig[newClass]?.label || newClass}`)
+      }
+    } catch (err) {
+      toast.error('Failed to update classification')
+    } finally {
+      setClassifying(false)
+    }
+  }
+
+  const unlinkTask = async (taskId: string) => {
+    setUnlinkingTaskId(taskId)
+    try {
+      const res = await fetch(`/api/emails/${emailId}/tasks/${taskId}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ['email', emailId] })
+        toast.success('Task unlinked')
+      } else {
+        toast.error('Failed to unlink task')
+      }
+    } catch (err) {
+      toast.error('Failed to unlink task')
+    } finally {
+      setUnlinkingTaskId(null)
+    }
+  }
+
+  const handleCreateTask = async () => {
+    if (!taskTitle.trim()) {
+      toast.error('Task title is required')
+      return
+    }
+
+    setCreatingTask(true)
+    try {
+      const res = await fetch('/api/emails/create-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: taskTitle,
+          summary: taskSummary,
+          sourceEmailId: emailId,
+          linkedEmailIds: linkedEmailIds.length > 0 ? linkedEmailIds : [emailId],
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        queryClient.invalidateQueries({ queryKey: ['email', emailId] })
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        toast.success('Task created')
+        setShowCreateModal(false)
+        setTaskTitle('')
+        setTaskSummary('')
+        setLinkedEmailIds([])
+      } else {
+        toast.error('Failed to create task')
+      }
+    } catch (err) {
+      toast.error('Failed to create task')
+    } finally {
+      setCreatingTask(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -65,15 +153,14 @@ export default function EmailDetailPage() {
   const senderInitial = (senderName || 'U')[0].toUpperCase()
 
   return (
-    <div className="animate-in fade-in mx-auto max-w-4xl space-y-5 duration-200">
-      {/* Back button */}
-      <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/emails')} className="gap-2 text-gray-500 hover:text-gray-900">
-        <ArrowLeft className="h-4 w-4" />
-        Back to inbox
-      </Button>
-
+    <div className="animate-in fade-in duration-200">
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/emails')} className="gap-2 text-gray-500 hover:text-gray-900 -ml-2">
+          <ArrowLeft className="h-4 w-4" />
+          Back to inbox
+        </Button>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Email content */}
         <div className="lg:col-span-2 space-y-4">
           {/* Header card */}
@@ -168,37 +255,54 @@ export default function EmailDetailPage() {
                 {email.taskLinks.map((link: any) => {
                   const band = getPriorityBand(link.task.priorityScore || 0)
                   const isDone = link.task.status === 'completed' || link.task.status === 'dismissed'
+                  const isUnlinking = unlinkingTaskId === link.task.id
                   return (
-                    <Link
+                    <div
                       key={link.id}
-                      href={`/dashboard/tasks/${link.task.id}`}
                       className={`flex items-center gap-3 rounded-lg border p-3 transition-all hover:shadow-sm group ${
                         isDone ? 'opacity-50 hover:opacity-70' : 'hover:bg-blue-50/50 hover:border-blue-200'
                       }`}
                     >
-                      <div className={`h-8 w-1 shrink-0 rounded-full ${
-                        band === 'critical' ? 'bg-red-500' : band === 'high' ? 'bg-orange-400' : band === 'medium' ? 'bg-yellow-400' : 'bg-gray-300'
-                      }`} />
-                      <div className="min-w-0 flex-1">
-                        <p className={`truncate text-sm font-medium transition-colors ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 group-hover:text-blue-600'}`}>
-                          {link.task.title}
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
-                            link.task.status === 'completed' ? 'bg-green-100 text-green-700' :
-                            link.task.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
-                            link.task.status === 'dismissed' ? 'bg-gray-100 text-gray-500' :
-                            'bg-purple-100 text-purple-700'
-                          }`}>
-                            {link.task.status}
-                          </span>
-                          <Badge variant="outline" className={`text-[9px] ${getPriorityColor(band)}`}>
-                            {getPriorityLabel(band)}
-                          </Badge>
+                      <Link
+                        href={`/dashboard/tasks/${link.task.id}`}
+                        className="flex items-center gap-3 flex-1 min-w-0"
+                      >
+                        <div className={`h-8 w-1 shrink-0 rounded-full ${
+                          band === 'critical' ? 'bg-red-500' : band === 'high' ? 'bg-orange-400' : band === 'medium' ? 'bg-yellow-400' : 'bg-gray-300'
+                        }`} />
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate text-sm font-medium transition-colors ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 group-hover:text-blue-600'}`}>
+                            {link.task.title}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+                              link.task.status === 'completed' ? 'bg-green-100 text-green-700' :
+                              link.task.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
+                              link.task.status === 'dismissed' ? 'bg-gray-100 text-gray-500' :
+                              'bg-purple-100 text-purple-700'
+                            }`}>
+                              {link.task.status}
+                            </span>
+                            <Badge variant="outline" className={`text-[9px] ${getPriorityColor(band)}`}>
+                              {getPriorityLabel(band)}
+                            </Badge>
+                          </div>
                         </div>
-                      </div>
-                      <ArrowUpRight className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0 transition-colors" />
-                    </Link>
+                        <ArrowUpRight className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0 transition-colors" />
+                      </Link>
+                      <button
+                        onClick={() => {
+                          if (confirm('Remove this task from the email?')) {
+                            unlinkTask(link.task.id)
+                          }
+                        }}
+                        disabled={isUnlinking}
+                        className="shrink-0 p-1 rounded hover:bg-red-50 transition-colors text-gray-300 hover:text-red-500 disabled:opacity-50"
+                        title="Remove task"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   )
                 })}
               </CardContent>
@@ -242,8 +346,125 @@ export default function EmailDetailPage() {
               </dl>
             </CardContent>
           </Card>
+
+          {/* Reclassify */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Tag className="h-4 w-4 text-blue-600" />
+                Mark As
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {Object.entries(classConfig).map(([key, config]) => (
+                <Button
+                  key={key}
+                  variant={email.classification === key ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => handleClassify(key)}
+                  disabled={classifying}
+                  className="w-full justify-start gap-2"
+                >
+                  <config.icon className="h-3.5 w-3.5" />
+                  {config.label}
+                </Button>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* Quick Actions */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Plus className="h-4 w-4 text-blue-600" />
+                Quick Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Button
+                onClick={() => setShowCreateModal(true)}
+                className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4" />
+                Create Task
+              </Button>
+            </CardContent>
+          </Card>
+
+        </div>
         </div>
       </div>
+
+      {/* Create Task Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Create Task from Email</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  placeholder="Enter task title"
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              {/* Summary */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
+                <textarea
+                  value={taskSummary}
+                  onChange={(e) => setTaskSummary(e.target.value)}
+                  placeholder="Enter task summary (optional)"
+                  rows={3}
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              {/* Linked Emails */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Link Emails</label>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {/* Current email is always linked */}
+                  <div className="flex items-center gap-2 rounded-lg border bg-blue-50 p-2">
+                    <input
+                      type="checkbox"
+                      checked={true}
+                      disabled
+                      className="rounded"
+                    />
+                    <span className="text-sm text-gray-700 flex-1 truncate">{email.subject}</span>
+                    <span className="text-xs text-gray-500">Current</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateTask}
+                  disabled={creatingTask || !taskTitle.trim()}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {creatingTask ? 'Creating...' : 'Create Task'}
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

@@ -12,10 +12,14 @@ import {
 } from '@/components/ui/select'
 import {
   Paperclip, Mail, CheckSquare, AlertTriangle, Trash2, Eye,
-  ChevronDown, ChevronRight, Search, SlidersHorizontal,
+  Search, SlidersHorizontal, LinkIcon, CalendarIcon, X,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { format, differenceInDays } from 'date-fns'
+import type { DateRange } from 'react-day-picker'
 
 const classColors: Record<string, string> = {
   action: 'bg-red-50 text-red-700 border-red-200',
@@ -38,7 +42,30 @@ export default function EmailsPage() {
   const [classification, setClassification] = useState('all')
   const [accountFilter, setAccountFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
+  const [calendarOpen, setCalendarOpen] = useState(false)
+  const [selectingStep, setSelectingStep] = useState<'from' | 'to'>('from')
   const [page, setPage] = useState(1)
+
+  const handleDayClick = (day: Date) => {
+    if (selectingStep === 'from') {
+      const newTo = dateRange?.to && dateRange.to >= day ? dateRange.to : undefined
+      setDateRange({ from: day, to: newTo })
+      setSelectingStep('to')
+    } else {
+      if (!dateRange?.from || day < dateRange.from) {
+        setDateRange({ from: day, to: undefined })
+        setSelectingStep('to')
+      } else {
+        setDateRange({ from: dateRange.from, to: day })
+        // stay open — user clicks Done
+      }
+    }
+  }
+
+  const handleCalendarOpenChange = (open: boolean) => {
+    setCalendarOpen(open)
+  }
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['emails', page],
@@ -62,7 +89,6 @@ export default function EmailsPage() {
   const filtered = useMemo(() => {
     let result = emails
 
-    // Tab filter: "actionable" = action + uncertain (task-linked or needing attention), "informational" = awareness + ignore
     if (tab === 'actionable') {
       result = result.filter((e: any) =>
         e.classification === 'action' || e.classification === 'uncertain' || e.taskLinks?.length > 0
@@ -73,17 +99,26 @@ export default function EmailsPage() {
       )
     }
 
-    // Classification sub-filter
     if (classification !== 'all') {
       result = result.filter((e: any) => e.classification === classification)
     }
 
-    // Account filter
     if (accountFilter !== 'all') {
       result = result.filter((e: any) => e.accountEmail === accountFilter)
     }
 
-    // Search
+    // Date range filter
+    if (dateRange?.from) {
+      const from = new Date(dateRange.from)
+      from.setHours(0, 0, 0, 0)
+      result = result.filter((e: any) => new Date(e.receivedAt) >= from)
+    }
+    if (dateRange?.to) {
+      const to = new Date(dateRange.to)
+      to.setHours(23, 59, 59, 999)
+      result = result.filter((e: any) => new Date(e.receivedAt) <= to)
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       result = result.filter((e: any) =>
@@ -94,30 +129,16 @@ export default function EmailsPage() {
     }
 
     return result
-  }, [emails, tab, classification, accountFilter, searchQuery])
+  }, [emails, tab, classification, accountFilter, searchQuery, dateRange])
 
-  // Group by task for focused tab, separate dismissed
-  const { activeTaskGroups, completedTaskGroups, dismissedTaskGroups, standalone } = useMemo(() => {
-    const taskMap: Record<string, { task: any; emails: any[] }> = {}
-    const standalone: any[] = []
-
-    for (const email of filtered) {
-      const link = email.taskLinks?.[0]
-      if (link?.task) {
-        const tid = link.task.id
-        if (!taskMap[tid]) taskMap[tid] = { task: link.task, emails: [] }
-        taskMap[tid].emails.push(email)
-      } else {
-        standalone.push(email)
-      }
+  // Split actionable into needs-attention vs has-tasks
+  const { needsAttention, hasTaskEmails } = useMemo(() => {
+    if (tab !== 'actionable') return { needsAttention: [], hasTaskEmails: [] }
+    return {
+      needsAttention: filtered.filter((e: any) => !(e.taskLinks?.length > 0)),
+      hasTaskEmails: filtered.filter((e: any) => e.taskLinks?.length > 0),
     }
-
-    const allGroups = Object.values(taskMap).sort((a, b) => b.emails.length - a.emails.length)
-    const activeTaskGroups = allGroups.filter(g => g.task.status === 'pending' || g.task.status === 'confirmed')
-    const completedTaskGroups = allGroups.filter(g => g.task.status === 'completed')
-    const dismissedTaskGroups = allGroups.filter(g => g.task.status === 'dismissed')
-    return { activeTaskGroups, completedTaskGroups, dismissedTaskGroups, standalone }
-  }, [filtered])
+  }, [filtered, tab])
 
   // Counts for tab badges
   const actionableCount = emails.filter((e: any) =>
@@ -141,7 +162,7 @@ export default function EmailsPage() {
         <p className="text-sm text-gray-500">{meta?.totalCount || 0} emails across {accounts.length || 1} account{accounts.length !== 1 ? 's' : ''}</p>
       </div>
 
-      {/* Outlook-style top tabs */}
+      {/* Tabs */}
       <div className="border-b mb-4">
         <div className="flex items-center gap-0">
           {tabs.map(({ key, label, count }) => (
@@ -172,7 +193,6 @@ export default function EmailsPage() {
 
       {/* Filter bar */}
       <div className="flex items-center gap-3 mb-4">
-        {/* Search */}
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
@@ -186,6 +206,119 @@ export default function EmailsPage() {
 
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-gray-400" />
+
+          {/* Date range picker */}
+          <div className="inline-flex items-center gap-1">
+          <Popover open={calendarOpen} onOpenChange={handleCalendarOpenChange}>
+            <PopoverTrigger
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 h-9 text-xs transition-all cursor-pointer ${
+                dateRange?.from
+                  ? 'border-blue-300 bg-blue-50 text-blue-700 shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <CalendarIcon className="h-3.5 w-3.5" />
+              {dateRange?.from ? (
+                <span className="font-medium">
+                  {format(dateRange.from, 'MMM d, yyyy')}
+                  {dateRange.to && dateRange.to.getTime() !== dateRange.from.getTime()
+                    ? ` – ${format(dateRange.to, 'MMM d, yyyy')}`
+                    : ''}
+                </span>
+              ) : (
+                <span>Date filter</span>
+              )}
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-0">
+              <div className="px-3 pt-3 pb-1 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSelectingStep('from')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer ${
+                      selectingStep === 'from'
+                        ? 'bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300'
+                        : dateRange?.from ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span className="text-[10px] text-gray-400 uppercase">From</span>
+                    {dateRange?.from ? format(dateRange.from, 'MMM d') : '—'}
+                  </button>
+                  <span className="text-gray-300">→</span>
+                  <button
+                    onClick={() => setSelectingStep('to')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer ${
+                      selectingStep === 'to'
+                        ? 'bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300'
+                        : dateRange?.to ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span className="text-[10px] text-gray-400 uppercase">To</span>
+                    {dateRange?.to ? format(dateRange.to, 'MMM d') : '—'}
+                  </button>
+                </div>
+                {dateRange?.from && (
+                  <button
+                    onClick={() => { setDateRange(undefined); setSelectingStep('from') }}
+                    className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <Calendar
+                captionLayout="dropdown"
+                modifiers={{
+                  range_start: dateRange?.from,
+                  range_end: dateRange?.to,
+                  range_middle:
+                    dateRange?.from && dateRange?.to &&
+                    dateRange.from.getTime() !== dateRange.to.getTime()
+                      ? { after: dateRange.from, before: dateRange.to }
+                      : undefined,
+                  selected:
+                    dateRange?.from && !dateRange?.to
+                      ? dateRange.from
+                      : undefined,
+                }}
+                onDayClick={handleDayClick}
+                numberOfMonths={2}
+                disabled={{ after: new Date() }}
+                startMonth={new Date(2024, 0)}
+                endMonth={new Date()}
+              />
+              {dateRange?.from && (
+                <div className="border-t px-3 py-2 flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    {dateRange.to && dateRange.to.getTime() !== dateRange.from.getTime() ? (
+                      <span className="text-blue-600 font-medium">
+                        {differenceInDays(dateRange.to, dateRange.from) + 1} days selected
+                      </span>
+                    ) : (
+                      <span className="text-blue-600 font-medium">
+                        {format(dateRange.from, 'EEEE, MMM d')}
+                      </span>
+                    )}
+                  </p>
+                  <button
+                    onClick={() => setCalendarOpen(false)}
+                    className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+          {dateRange?.from && (
+            <button
+              onClick={() => { setDateRange(undefined); setSelectingStep('from') }}
+              className="rounded-full p-1 hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
+              title="Clear date filter"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+          </div>
 
           {/* Classification filter */}
           <Select value={classification} onValueChange={(v) => { if (v) setClassification(v) }}>
@@ -201,7 +334,6 @@ export default function EmailsPage() {
             </SelectContent>
           </Select>
 
-          {/* Account filter */}
           {accounts.length > 0 && (
             <Select value={accountFilter} onValueChange={(v) => { if (v) setAccountFilter(v) }}>
               <SelectTrigger className="w-[200px] h-9 text-xs">
@@ -235,11 +367,11 @@ export default function EmailsPage() {
           </CardContent>
         </Card>
       ) : tab === 'actionable' ? (
-        <FocusedView activeTaskGroups={activeTaskGroups} completedTaskGroups={completedTaskGroups} dismissedTaskGroups={dismissedTaskGroups} standalone={standalone} accounts={accounts} />
+        <ActionableView needsAttention={needsAttention} hasTaskEmails={hasTaskEmails} />
       ) : tab === 'informational' ? (
-        <OtherView emails={filtered} accounts={accounts} />
+        <InformationalView emails={filtered} />
       ) : (
-        <AllView emails={filtered} accounts={accounts} />
+        <FlatList emails={filtered} />
       )}
 
       {/* Pagination */}
@@ -266,77 +398,42 @@ export default function EmailsPage() {
   )
 }
 
-/* ========== FOCUSED VIEW ========== */
-function FocusedView({ activeTaskGroups, completedTaskGroups, dismissedTaskGroups, standalone, accounts }: {
-  activeTaskGroups: { task: any; emails: any[] }[]
-  completedTaskGroups: { task: any; emails: any[] }[]
-  dismissedTaskGroups: { task: any; emails: any[] }[]
-  standalone: any[]
-  accounts: string[]
+/* ========== ACTIONABLE VIEW — flat list, no task grouping ========== */
+function ActionableView({ needsAttention, hasTaskEmails }: {
+  needsAttention: any[]
+  hasTaskEmails: any[]
 }) {
   return (
     <div className="space-y-4">
-      {/* Standalone action/uncertain emails — highest priority, not yet processed */}
-      {standalone.length > 0 && (
+      {needsAttention.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1">
             <AlertTriangle className="h-4 w-4 text-red-500" />
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Needs Attention ({standalone.length})
+              Needs Attention ({needsAttention.length})
             </span>
           </div>
-          {standalone.map((email: any) => (
-            <EmailRow key={email.id} email={email} showAccount />
+          {needsAttention.map((email: any) => (
+            <EmailRow key={email.id} email={email} />
           ))}
         </div>
       )}
 
-      {/* Active task-linked groups (pending/confirmed) */}
-      {activeTaskGroups.length > 0 && (
-        <div className="space-y-3">
+      {hasTaskEmails.length > 0 && (
+        <div className="space-y-2">
           <div className="flex items-center gap-2 px-1">
-            <CheckSquare className="h-4 w-4 text-blue-600" />
+            <LinkIcon className="h-4 w-4 text-blue-500" />
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Task Related ({activeTaskGroups.reduce((s, g) => s + g.emails.length, 0)})
+              Linked to Tasks ({hasTaskEmails.length})
             </span>
           </div>
-          {activeTaskGroups.map((group) => (
-            <TaskEmailGroup key={group.task.id} task={group.task} emails={group.emails} showAccount />
+          {hasTaskEmails.map((email: any) => (
+            <EmailRow key={email.id} email={email} />
           ))}
         </div>
       )}
 
-      {/* Completed task-linked groups — slightly muted */}
-      {completedTaskGroups.length > 0 && (
-        <div className="space-y-3 opacity-60">
-          <div className="flex items-center gap-2 px-1">
-            <CheckSquare className="h-4 w-4 text-green-500" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-green-600">
-              Completed ({completedTaskGroups.reduce((s, g) => s + g.emails.length, 0)})
-            </span>
-          </div>
-          {completedTaskGroups.map((group) => (
-            <TaskEmailGroup key={group.task.id} task={group.task} emails={group.emails} showAccount />
-          ))}
-        </div>
-      )}
-
-      {/* Dismissed task-linked groups — most muted, at the bottom */}
-      {dismissedTaskGroups.length > 0 && (
-        <div className="space-y-3 opacity-40">
-          <div className="flex items-center gap-2 px-1">
-            <Trash2 className="h-4 w-4 text-gray-400" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-              Dismissed ({dismissedTaskGroups.reduce((s, g) => s + g.emails.length, 0)})
-            </span>
-          </div>
-          {dismissedTaskGroups.map((group) => (
-            <TaskEmailGroup key={group.task.id} task={group.task} emails={group.emails} showAccount />
-          ))}
-        </div>
-      )}
-
-      {activeTaskGroups.length === 0 && completedTaskGroups.length === 0 && dismissedTaskGroups.length === 0 && standalone.length === 0 && (
+      {needsAttention.length === 0 && hasTaskEmails.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center">
             <CheckSquare className="mx-auto mb-3 h-10 w-10 text-green-300" />
@@ -348,9 +445,8 @@ function FocusedView({ activeTaskGroups, completedTaskGroups, dismissedTaskGroup
   )
 }
 
-/* ========== OTHER VIEW ========== */
-function OtherView({ emails, accounts }: { emails: any[]; accounts: string[] }) {
-  // Sub-group: Awareness vs Ignored
+/* ========== INFORMATIONAL VIEW ========== */
+function InformationalView({ emails }: { emails: any[] }) {
   const awareness = emails.filter((e: any) => e.classification === 'awareness')
   const ignored = emails.filter((e: any) => e.classification === 'ignore')
 
@@ -365,7 +461,7 @@ function OtherView({ emails, accounts }: { emails: any[]; accounts: string[] }) 
             </span>
           </div>
           {awareness.map((email: any) => (
-            <EmailRow key={email.id} email={email} showAccount />
+            <EmailRow key={email.id} email={email} />
           ))}
         </div>
       )}
@@ -379,7 +475,7 @@ function OtherView({ emails, accounts }: { emails: any[]; accounts: string[] }) 
             </span>
           </div>
           {ignored.map((email: any) => (
-            <EmailRow key={email.id} email={email} showAccount compact />
+            <EmailRow key={email.id} email={email} compact />
           ))}
         </div>
       )}
@@ -387,107 +483,61 @@ function OtherView({ emails, accounts }: { emails: any[]; accounts: string[] }) 
   )
 }
 
-/* ========== ALL VIEW ========== */
-function AllView({ emails, accounts }: { emails: any[]; accounts: string[] }) {
+/* ========== FLAT LIST ========== */
+function FlatList({ emails }: { emails: any[] }) {
   return (
     <div className="space-y-2">
       {emails.map((email: any) => (
-        <EmailRow key={email.id} email={email} showAccount />
+        <EmailRow key={email.id} email={email} />
       ))}
     </div>
   )
 }
 
-/* ========== TASK EMAIL GROUP ========== */
-function TaskEmailGroup({ task, emails, showAccount }: { task: any; emails: any[]; showAccount: boolean }) {
-  const [expanded, setExpanded] = useState(true)
-
-  const statusColor =
-    task.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
-    task.status === 'dismissed' ? 'bg-gray-100 text-gray-500 border-gray-200' :
-    task.status === 'confirmed' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-    'bg-purple-100 text-purple-700 border-purple-200'
+/* ========== EMAIL ROW — shows linked tasks as badges ========== */
+function EmailRow({ email, compact }: { email: any; compact?: boolean }) {
+  const linkedTasks = email.taskLinks?.map((l: any) => l.task).filter(Boolean) || []
 
   return (
-    <Card className="overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+    <div className={`flex items-center gap-3 rounded-lg border bg-white px-4 transition-all hover:bg-blue-50/50 hover:border-blue-200 ${
+      compact ? 'py-2 opacity-75' : 'py-3'
+    }`}>
+      <Link
+        href={`/dashboard/emails/${email.id}`}
+        className="flex items-center gap-3 min-w-0 flex-1"
       >
-        {expanded ? <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-gray-400 shrink-0" />}
+        <ClassBadge classification={email.classification} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-gray-900">{task.title}</span>
-            <Badge variant="outline" className={statusColor}>{task.status}</Badge>
-            <span className="text-xs text-gray-400">{emails.length} email{emails.length > 1 ? 's' : ''}</span>
+            <p className={`truncate font-medium text-gray-900 ${compact ? 'text-xs' : 'text-sm'}`}>{email.subject}</p>
+            {email.hasAttachments && <Paperclip className="h-3 w-3 flex-shrink-0 text-gray-400" />}
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
+            {email.accountEmail && <AccountBadge account={email.accountEmail} />}
           </div>
         </div>
-        <Link
-          href={`/dashboard/tasks/${task.id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-        >
-          Open Task
-        </Link>
-      </button>
+        <span className="flex-shrink-0 text-xs text-gray-400">{formatDate(email.receivedAt)}</span>
+      </Link>
 
-      {expanded && (
-        <div className="border-t divide-y">
-          {emails.map((email: any) => (
-            <Link key={email.id} href={`/dashboard/emails/${email.id}`} className="flex items-center gap-3 px-4 py-2.5 pl-10 hover:bg-blue-50/50 transition-colors">
-              <ClassBadge classification={email.classification} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-gray-800">{email.subject}</p>
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
-                  {showAccount && email.accountEmail && (
-                    <AccountBadge account={email.accountEmail} />
-                  )}
-                </div>
-              </div>
-              {email.hasAttachments && <Paperclip className="h-3 w-3 text-gray-400 shrink-0" />}
-              <span className="shrink-0 text-xs text-gray-400">{formatDate(email.receivedAt)}</span>
+      {/* Linked task badges */}
+      {linkedTasks.length > 0 && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          {linkedTasks.map((task: any) => (
+            <Link
+              key={task.id}
+              href={`/dashboard/tasks/${task.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium text-blue-600 bg-blue-50 border-blue-200 hover:bg-blue-100 transition-colors max-w-[140px]"
+              title={task.title}
+            >
+              <CheckSquare className="h-2.5 w-2.5 shrink-0" />
+              <span className="truncate">{task.title}</span>
             </Link>
           ))}
         </div>
       )}
-    </Card>
-  )
-}
-
-/* ========== EMAIL ROW ========== */
-function EmailRow({ email, showAccount, compact }: { email: any; showAccount: boolean; compact?: boolean }) {
-  const taskLink = email.taskLinks?.[0]?.task
-
-  return (
-    <Link
-      href={`/dashboard/emails/${email.id}`}
-      className={`flex items-center gap-3 rounded-lg border bg-white px-4 transition-colors hover:bg-blue-50/50 hover:border-blue-200 ${
-        compact ? 'py-2 opacity-75' : 'py-3'
-      }`}
-    >
-      <ClassBadge classification={email.classification} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className={`truncate font-medium text-gray-900 ${compact ? 'text-xs' : 'text-sm'}`}>{email.subject}</p>
-          {email.hasAttachments && <Paperclip className="h-3 w-3 flex-shrink-0 text-gray-400" />}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
-          {showAccount && email.accountEmail && (
-            <AccountBadge account={email.accountEmail} />
-          )}
-        </div>
-      </div>
-      {taskLink && (
-        <span className="shrink-0">
-          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-[10px]">
-            ↗ {taskLink.title?.slice(0, 20)}{taskLink.title?.length > 20 ? '…' : ''}
-          </Badge>
-        </span>
-      )}
-      <span className="flex-shrink-0 text-xs text-gray-400">{formatDate(email.receivedAt)}</span>
-    </Link>
+    </div>
   )
 }
 
@@ -503,7 +553,6 @@ function ClassBadge({ classification }: { classification: string }) {
 }
 
 function AccountBadge({ account }: { account: string }) {
-  // Shorten: "demo@emailflow.ai" → "emailflow.ai", "demo.personal@gmail.com" → "gmail.com"
   const domain = account.split('@')[1] || account
   const isWork = !['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'].includes(domain)
 

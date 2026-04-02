@@ -14,9 +14,10 @@ import {
 } from '@/components/ui/select'
 import {
   Check, X, Eye, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
-  Mail, Clock, ArrowUpRight, ThumbsUp,
+  Mail, Clock, ArrowUpRight, ThumbsUp, Plus,
 } from 'lucide-react'
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
@@ -32,9 +33,14 @@ const STATUS_OPTIONS = [
 ]
 
 export default function TasksPage() {
+  const router = useRouter()
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('priority')
   const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [taskTitle, setTaskTitle] = useState('')
+  const [taskSummary, setTaskSummary] = useState('')
+  const [creatingTask, setCreatingTask] = useState(false)
   const queryClient = useQueryClient()
 
   // Fetch all tasks (no server-side status filter — we filter client-side for "all")
@@ -44,6 +50,42 @@ export default function TasksPage() {
     queryFn: () =>
       fetch(`/api/tasks?status=${apiStatus}&sort=${sortBy}&limit=50`).then((r) => r.json()),
   })
+
+  const handleCreateTask = async () => {
+    if (!taskTitle.trim()) {
+      toast.error('Task title is required')
+      return
+    }
+
+    setCreatingTask(true)
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: taskTitle,
+          summary: taskSummary,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        toast.success('Task created')
+        setShowCreateModal(false)
+        setTaskTitle('')
+        setTaskSummary('')
+        // Navigate to the new task
+        router.push(`/dashboard/tasks/${data.data.id}`)
+      } else {
+        toast.error('Failed to create task')
+      }
+    } catch (err) {
+      toast.error('Failed to create task')
+    } finally {
+      setCreatingTask(false)
+    }
+  }
 
   const updateTask = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) =>
@@ -69,26 +111,36 @@ export default function TasksPage() {
           <p className="text-sm text-gray-500">{res?.meta?.totalCount || 0} tasks</p>
         </div>
 
-        {/* View mode toggle */}
-        <div className="flex rounded-lg border bg-white p-0.5">
-          {([
-            { mode: 'list' as const, icon: List, label: 'List' },
-            { mode: 'timeline' as const, icon: GanttChart, label: 'Timeline' },
-            { mode: 'calendar' as const, icon: Calendar, label: 'Calendar' },
-          ]).map(({ mode, icon: Icon, label }) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                viewMode === mode
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
+        {/* Create button + View mode toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="gap-2 bg-blue-600 hover:bg-blue-700"
+            size="sm"
+          >
+            <Plus className="h-4 w-4" />
+            New Task
+          </Button>
+          <div className="flex rounded-lg border bg-white p-0.5">
+            {([
+              { mode: 'list' as const, icon: List, label: 'List' },
+              { mode: 'timeline' as const, icon: GanttChart, label: 'Timeline' },
+              { mode: 'calendar' as const, icon: Calendar, label: 'Calendar' },
+            ]).map(({ mode, icon: Icon, label }) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === mode
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -142,6 +194,61 @@ export default function TasksPage() {
         <GanttTimeline tasks={tasks} updateTask={updateTask} />
       ) : (
         <TaskCalendarView tasks={tasks} updateTask={updateTask} />
+      )}
+
+      {/* Create Task Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md">
+            <CardContent className="pt-6 space-y-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 mb-4">Create New Task</h2>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  placeholder="Enter task title"
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  autoFocus
+                />
+              </div>
+
+              {/* Summary */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
+                <textarea
+                  value={taskSummary}
+                  onChange={(e) => setTaskSummary(e.target.value)}
+                  placeholder="Enter task summary (optional)"
+                  rows={3}
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateTask}
+                  disabled={creatingTask || !taskTitle.trim()}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {creatingTask ? 'Creating...' : 'Create Task'}
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   )
