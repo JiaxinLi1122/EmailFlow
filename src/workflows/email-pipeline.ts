@@ -2,6 +2,7 @@ import { classifyEmail, extractTask, scorePriority } from '@/ai'
 import { preFilterEmail, prepareForClassification, prepareForExtraction } from '@/ai/utils'
 import * as emailRepo from '@/repositories/email-repo'
 import * as taskRepo from '@/repositories/task-repo'
+import { prisma } from '@/lib/prisma'
 
 // ============================================================
 // Email Pipeline — processes a single email through the full AI pipeline
@@ -59,14 +60,45 @@ function stepPreFilter(email: {
  * Minimal hardcoded memory
  * Later you can replace this with DB lookup by userId.
  */
-function getLightweightMemory(sender: string) {
+async function getLightweightMemory(
+  userId: string,
+  sender: string
+) {
   const lowerSender = sender.toLowerCase()
 
   const globalMemory = [
     'Prefer short actionable summaries.',
-    'Emails about deadlines, meetings, interviews, university, work, bills, and verification should be treated as more important.',
+    'Emails about deadlines, meetings, interviews, university, work, bills, payments, verification, approvals, and submissions should be treated as more important.',
     'Promotional, newsletter, discount, sale, and generic marketing emails are usually low value unless they contain a clear required action.',
   ]
+
+  const senderMemory = await prisma.senderMemory.findUnique({
+    where: {
+      userId_sender: {
+        userId,
+        sender,
+      },
+    },
+  })
+
+  const learnedMemory: string[] = []
+
+  if (senderMemory) {
+    const total =
+      senderMemory.actionCount +
+      senderMemory.awarenessCount +
+      senderMemory.ignoreCount
+
+    if (total >= 3) {
+      if (senderMemory.ignoreCount / total > 0.7) {
+        learnedMemory.push('User usually ignores emails from this sender.')
+      }
+
+      if (senderMemory.actionCount / total > 0.6) {
+        learnedMemory.push('User usually treats emails from this sender as requiring action.')
+      }
+    }
+  }
 
   const senderSpecificMemory: string[] = []
 
@@ -74,22 +106,14 @@ function getLightweightMemory(sender: string) {
     senderSpecificMemory.push('Emails from anu.edu.au are usually important and often action-related.')
   }
 
-  if (
-    lowerSender.includes('noreply') ||
-    lowerSender.includes('no-reply') ||
-    lowerSender.includes('newsletter')
-  ) {
-    senderSpecificMemory.push('No-reply or newsletter-style senders are often awareness or ignore unless there is a specific required action.')
-  }
-
-  return [...globalMemory, ...senderSpecificMemory]
+  return [...globalMemory, ...senderSpecificMemory, ...learnedMemory]
 }
 
 /**
  * Build a small memory block to prepend to model input
  */
-function buildMemoryPrefix(sender: string) {
-  const memoryLines = getLightweightMemory(sender)
+async function buildMemoryPrefix(userId: string, sender: string) {
+  const memoryLines = await getLightweightMemory(userId, sender)
 
   return [
     'User preferences and learned handling rules:',
@@ -103,7 +127,7 @@ function buildMemoryPrefix(sender: string) {
 /**
  * Step 1: Classify an email using AI (with cleaned body + lightweight memory)
  */
-async function stepClassify(email: {
+async function stepClassify(userId: string,email: {
   id: string
   subject: string
   sender: string
@@ -122,7 +146,7 @@ async function stepClassify(email: {
     sender: email.sender,
     date: email.receivedAt.toISOString(),
     bodyPreview: cleanedBody,
-    memory: buildMemoryPrefix(email.sender),
+    memory: await buildMemoryPrefix(userId, email.sender),
   })
 
   await emailRepo.updateClassification(email.id, result)
@@ -132,7 +156,7 @@ async function stepClassify(email: {
 /**
  * Step 2: Extract a task from an action email (with full cleaned body + lightweight memory)
  */
-async function stepExtractTask(email: {
+async function stepExtractTask(userId: string, email: {
   subject: string
   sender: string
   receivedAt: Date
@@ -151,7 +175,7 @@ async function stepExtractTask(email: {
     date: email.receivedAt.toISOString(),
     bodyPreview: email.bodyPreview,
     body: cleanedBody,
-    memory: buildMemoryPrefix(email.sender),
+    memory: await buildMemoryPrefix(userId, email.sender),
   })
 }
 
@@ -161,6 +185,7 @@ async function stepExtractTask(email: {
 async function stepScorePriority(
   extraction: { title: string; summary: string; actionItems: string[] },
   sender: string
+  userId: string
 ) {
   return scorePriority({
     title: extraction.title,
@@ -168,7 +193,7 @@ async function stepScorePriority(
     actionItems: extraction.actionItems,
     sender,
     currentDate: new Date().toISOString().split('T')[0],
-    memory: buildMemoryPrefix(sender),
+    memory: await buildMemoryPrefix(userId, sender),
   })
 }
 
@@ -206,7 +231,8 @@ export async function processEmail(
     }
   }
 
-  const classification = await stepClassify(email)
+  const classification = await stepClassify(userId, email)
+  await updateSenderMemory(userId, email.sender, classification.category)
 
   if (classification.category !== 'action') {
     return {
@@ -218,8 +244,12 @@ export async function processEmail(
     }
   }
 
-  const extraction = await stepExtractTask(email)
-  const priority = await stepScorePriority(extraction, email.sender)
+  const extraction = await stepExtractTask(userId, email)
+  const priority = await stepScorePriority(
+    extraction,
+    email.sender,
+    userId
+  )
 
   const task = await taskRepo.createTask({
     userId,
@@ -236,4 +266,46 @@ export async function processEmail(
     taskId: task.id,
     skippedByRule: false,
   }
+}
+
+async function updateSenderMemory(
+  userId: string,
+  sender: string,
+  category: string
+) {
+  const existing = await prisma.senderMemory.findUnique({
+    where: {
+      userId_sender: {
+        userId,
+        sender,
+      },
+    },
+  })
+
+  if (!existing) {
+    await prisma.senderMemory.create({
+      data: {
+        userId,
+        sender,
+        actionCount: category === 'action' ? 1 : 0,
+        awarenessCount: category === 'awareness' ? 1 : 0,
+        ignoreCount: category === 'ignore' ? 1 : 0,
+      },
+    })
+    return
+  }
+
+  await prisma.senderMemory.update({
+    where: {
+      userId_sender: {
+        userId,
+        sender,
+      },
+    },
+    data: {
+      actionCount: existing.actionCount + (category === 'action' ? 1 : 0),
+      awarenessCount: existing.awarenessCount + (category === 'awareness' ? 1 : 0),
+      ignoreCount: existing.ignoreCount + (category === 'ignore' ? 1 : 0),
+    },
+  })
 }

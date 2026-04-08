@@ -151,3 +151,17 @@ model Digest {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+model SenderMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  sender    String
+
+  actionCount     Int @default(0)
+  awarenessCount  Int @default(0)
+  ignoreCount     Int @default(0)
+
+  lastUpdated     DateTime @updatedAt
+
+  @@unique([userId, sender])
+}
