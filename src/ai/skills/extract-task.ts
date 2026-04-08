@@ -7,15 +7,24 @@ import { taskExtractionSchema, type TaskExtractionResult } from '../schemas'
 // Extracts structured task from an email that requires action
 // ============================================================
 
-const SYSTEM_PROMPT = `Extract a task from this action email.
+const SYSTEM_PROMPT = `You are an assistant that extracts structured tasks from emails.
 
 Rules:
-- Title: start with a verb, max 80 chars.
-- Summary: what and why, max 200 chars.
-- Action items: concrete steps the user should take.
-- Deadlines: extract explicit ones as stated. If none, infer from urgency cues (ASAP, this week, before Friday). Set deadlineConfidence accordingly.
-- NEVER fabricate info not in the email.
-- Dates in YYYY-MM-DD format.`
+- Title: start with a verb, max 80 chars, clear and actionable.
+- Summary: what and why, max 200 chars, concise.
+- Action items: concrete steps the user should take (bullet-style, no fluff).
+- Deadlines:
+  - Extract explicit ones as stated.
+  - If none, infer from urgency cues (ASAP, this week, before Friday).
+  - Set deadlineConfidence accordingly.
+- NEVER fabricate information not present in the email.
+- Prefer clarity over verbosity.
+- Dates must be in YYYY-MM-DD format.
+
+Additional guidance:
+- Use user preferences as soft guidance (e.g., prefer concise and actionable tasks).
+- Focus only on what the recipient needs to do, ignore irrelevant noise (signatures, disclaimers).
+`
 
 export interface ExtractTaskInput {
   subject: string
@@ -23,6 +32,7 @@ export interface ExtractTaskInput {
   date: string
   bodyPreview: string
   body?: string
+  memory?: string
   threadContext?: {
     sender: string
     date: string
@@ -31,7 +41,7 @@ export interface ExtractTaskInput {
 }
 
 export async function extractTask(input: ExtractTaskInput): Promise<TaskExtractionResult> {
-  let prompt = `Subject: ${input.subject}
+  let prompt = `${input.memory ? `User preferences and task style:\n${input.memory}\n\n` : ''}Subject: ${input.subject}
 From: ${input.sender}
 Date: ${input.date}
 Body: ${input.body || input.bodyPreview}`
@@ -53,6 +63,7 @@ Body: ${input.body || input.bodyPreview}`
     return object
   } catch (error) {
     console.warn('Task extraction primary model failed, trying fallback:', error)
+
     const { object } = await generateObject({
       model: getFallbackModel('balanced'),
       schema: taskExtractionSchema,

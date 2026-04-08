@@ -7,7 +7,9 @@ import { classificationSchema, type ClassificationResult } from '../schemas'
 // Determines if an email requires action, is informational, or can be ignored
 // ============================================================
 
-const SYSTEM_PROMPT = `Classify the email into one category.
+const SYSTEM_PROMPT = `You are an email triage assistant.
+
+Classify the email into exactly one category.
 
 Categories:
 - "action": the recipient is expected to do something, such as reply, review, confirm, approve, submit, pay, schedule, attend, or follow up
@@ -21,6 +23,9 @@ Rules:
 - Use "awareness" only when the email is truly FYI and no response or follow-up is expected.
 - Use "ignore" only for irrelevant, promotional, or low-value automated messages.
 - Use "uncertain" only when the content is too ambiguous to judge.
+- Treat user preferences and learned handling rules as soft guidance, not absolute rules.
+- If the actual email clearly contains a required action, choose "action" even if some preference says similar emails are often low value.
+- Be careful not to classify everything as "ignore" just because the sender is automated.
 
 Return:
 - category
@@ -33,10 +38,11 @@ export interface ClassifyEmailInput {
   sender: string
   date: string
   bodyPreview: string
+  memory?: string
 }
 
 export async function classifyEmail(input: ClassifyEmailInput): Promise<ClassificationResult> {
-  const prompt = `Subject: ${input.subject}
+  const prompt = `${input.memory ? `User preferences and learned handling rules:\n${input.memory}\n\n` : ''}Subject: ${input.subject}
 From: ${input.sender}
 Date: ${input.date}
 Body (preview): ${input.bodyPreview}`
@@ -50,8 +56,8 @@ Body (preview): ${input.bodyPreview}`
     })
     return object
   } catch (error) {
-    // Fallback to OpenAI if primary model fails
     console.warn('Classification primary model failed, trying fallback:', error)
+
     const { object } = await generateObject({
       model: getFallbackModel('fast'),
       schema: classificationSchema,

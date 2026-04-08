@@ -6,18 +6,10 @@ import * as taskRepo from '@/repositories/task-repo'
 // ============================================================
 // Email Pipeline — processes a single email through the full AI pipeline
 //
-// Steps:
-//   0. Pre-filter (rules, no AI) → skip obvious spam/promotions
-//   1. Classify (AI, short body) → action / awareness / ignore / uncertain
-//   2. Extract task (AI, full cleaned body) → only for action/uncertain
-//   3. Score priority (AI) → urgency × impact
-//   4. Save to database
-//
-// Token optimization:
-//   - Pre-filter skips 30-40% of emails entirely (no AI call)
-//   - Body cleaning removes signatures, disclaimers, quoted replies
-//   - Classification uses short body (500 chars) — enough to judge intent
-//   - Extraction uses full cleaned body — preserves all action items
+// Minimal memory version:
+//   - No DB changes yet
+//   - No AI skill signature changes yet
+//   - Inject lightweight memory directly into the text sent to the model
 // ============================================================
 
 export interface PipelineResult {
@@ -37,9 +29,6 @@ function stepPreFilter(email: {
   subject: string
   labels: string
 }) {
-  // providerCategories is stored alongside labels in the DB
-  // For now, we derive it from the stored labels (JSON string)
-  // In the future, this could be stored as a separate column
   let labelArray: string[] = []
   try {
     labelArray = JSON.parse(email.labels || '[]')
@@ -47,14 +36,14 @@ function stepPreFilter(email: {
     labelArray = []
   }
 
-  // Map known provider labels to normalized categories
   const categoryMap: Record<string, 'spam' | 'promotions' | 'social' | 'updates'> = {
-    'SPAM': 'spam',
-    'CATEGORY_PROMOTIONS': 'promotions',
-    'CATEGORY_SOCIAL': 'social',
-    'CATEGORY_UPDATES': 'updates',
-    'CATEGORY_FORUMS': 'social',
+    SPAM: 'spam',
+    CATEGORY_PROMOTIONS: 'promotions',
+    CATEGORY_SOCIAL: 'social',
+    CATEGORY_UPDATES: 'updates',
+    CATEGORY_FORUMS: 'social',
   }
+
   const providerCategories = labelArray
     .map((l) => categoryMap[l])
     .filter((c): c is 'spam' | 'promotions' | 'social' | 'updates' => !!c)
@@ -67,7 +56,52 @@ function stepPreFilter(email: {
 }
 
 /**
- * Step 1: Classify an email using AI (with cleaned body)
+ * Minimal hardcoded memory
+ * Later you can replace this with DB lookup by userId.
+ */
+function getLightweightMemory(sender: string) {
+  const lowerSender = sender.toLowerCase()
+
+  const globalMemory = [
+    'Prefer short actionable summaries.',
+    'Emails about deadlines, meetings, interviews, university, work, bills, and verification should be treated as more important.',
+    'Promotional, newsletter, discount, sale, and generic marketing emails are usually low value unless they contain a clear required action.',
+  ]
+
+  const senderSpecificMemory: string[] = []
+
+  if (lowerSender.includes('anu.edu.au')) {
+    senderSpecificMemory.push('Emails from anu.edu.au are usually important and often action-related.')
+  }
+
+  if (
+    lowerSender.includes('noreply') ||
+    lowerSender.includes('no-reply') ||
+    lowerSender.includes('newsletter')
+  ) {
+    senderSpecificMemory.push('No-reply or newsletter-style senders are often awareness or ignore unless there is a specific required action.')
+  }
+
+  return [...globalMemory, ...senderSpecificMemory]
+}
+
+/**
+ * Build a small memory block to prepend to model input
+ */
+function buildMemoryPrefix(sender: string) {
+  const memoryLines = getLightweightMemory(sender)
+
+  return [
+    'User preferences and learned handling rules:',
+    ...memoryLines.map((line) => `- ${line}`),
+    '',
+    'Use these preferences as soft guidance, but base the final decision on the actual email content.',
+    '',
+  ].join('\n')
+}
+
+/**
+ * Step 1: Classify an email using AI (with cleaned body + lightweight memory)
  */
 async function stepClassify(email: {
   id: string
@@ -77,15 +111,18 @@ async function stepClassify(email: {
   bodyPreview: string
   bodyFull: string | null
 }) {
-  // Use full body when available, fallback to preview
   const rawBody = email.bodyFull || email.bodyPreview
   const cleanedBody = prepareForClassification(rawBody)
+
+  const memoryPrefix = buildMemoryPrefix(email.sender)
+  const bodyWithMemory = `${memoryPrefix}${cleanedBody}`
 
   const result = await classifyEmail({
     subject: email.subject,
     sender: email.sender,
     date: email.receivedAt.toISOString(),
     bodyPreview: cleanedBody,
+    memory: buildMemoryPrefix(email.sender),
   })
 
   await emailRepo.updateClassification(email.id, result)
@@ -93,7 +130,7 @@ async function stepClassify(email: {
 }
 
 /**
- * Step 2: Extract a task from an action/uncertain email (with full cleaned body)
+ * Step 2: Extract a task from an action email (with full cleaned body + lightweight memory)
  */
 async function stepExtractTask(email: {
   subject: string
@@ -102,9 +139,11 @@ async function stepExtractTask(email: {
   bodyPreview: string
   bodyFull: string | null
 }) {
-  // Use full cleaned body for extraction — need all action items and deadlines
   const rawBody = email.bodyFull || email.bodyPreview
   const cleanedBody = prepareForExtraction(rawBody)
+
+  const memoryPrefix = buildMemoryPrefix(email.sender)
+  const bodyWithMemory = `${memoryPrefix}${cleanedBody}`
 
   return extractTask({
     subject: email.subject,
@@ -112,6 +151,7 @@ async function stepExtractTask(email: {
     date: email.receivedAt.toISOString(),
     bodyPreview: email.bodyPreview,
     body: cleanedBody,
+    memory: buildMemoryPrefix(email.sender),
   })
 }
 
@@ -128,6 +168,7 @@ async function stepScorePriority(
     actionItems: extraction.actionItems,
     sender,
     currentDate: new Date().toISOString().split('T')[0],
+    memory: buildMemoryPrefix(sender),
   })
 }
 
@@ -146,8 +187,8 @@ export async function processEmail(
     labels: string
   }
 ): Promise<PipelineResult> {
-  // Step 0: Pre-filter — skip AI for obvious spam/promotions/auto-replies
   const preFilter = stepPreFilter(email)
+
   if (preFilter.skipped) {
     await emailRepo.updateClassification(email.id, {
       category: preFilter.category!,
@@ -155,6 +196,7 @@ export async function processEmail(
       reasoning: preFilter.reasoning!,
       isWorkRelated: preFilter.isWorkRelated!,
     })
+
     return {
       emailId: email.id,
       classification: preFilter.category!,
@@ -164,10 +206,8 @@ export async function processEmail(
     }
   }
 
-  // Step 1: Classify with AI
   const classification = await stepClassify(email)
 
-  // Only extract tasks for clear action emails
   if (classification.category !== 'action') {
     return {
       emailId: email.id,
@@ -178,13 +218,9 @@ export async function processEmail(
     }
   }
 
-  // Step 2: Extract task
   const extraction = await stepExtractTask(email)
-
-  // Step 3: Score priority
   const priority = await stepScorePriority(extraction, email.sender)
 
-  // Step 4: Save to database
   const task = await taskRepo.createTask({
     userId,
     emailId: email.id,
