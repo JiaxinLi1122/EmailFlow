@@ -184,7 +184,7 @@ async function stepExtractTask(userId: string, email: {
  */
 async function stepScorePriority(
   extraction: { title: string; summary: string; actionItems: string[] },
-  sender: string
+  sender: string,
   userId: string
 ) {
   return scorePriority({
