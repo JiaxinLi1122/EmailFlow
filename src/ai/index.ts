@@ -9,6 +9,7 @@ export {
   extractTask,
   scorePriority,
   generateDigest,
+  updateThreadMemory,
 } from './skills'
 
 export type {
@@ -16,6 +17,7 @@ export type {
   ExtractTaskInput,
   ScorePriorityInput,
   GenerateDigestInput,
+  UpdateThreadMemoryInput,
 } from './skills'
 
 // Schemas (output format definitions)
@@ -24,6 +26,7 @@ export {
   taskExtractionSchema,
   prioritySchema,
   digestSchema,
+  threadMemoryUpdateSchema,
 } from './schemas'
 
 export type {
@@ -31,6 +34,7 @@ export type {
   TaskExtractionResult,
   PriorityResult,
   DigestResult,
+  ThreadMemoryUpdateResult,
 } from './schemas'
 
 // Provider (model configuration)

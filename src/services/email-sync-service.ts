@@ -50,6 +50,7 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
           bodyPreview: email.bodyPreview,
           bodyFull: email.bodyFull,
           labels: email.labels,
+          threadId: email.threadId,
         })
 
         if (result?.taskCreated) {

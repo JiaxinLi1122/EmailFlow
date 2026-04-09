@@ -165,3 +165,32 @@ model SenderMemory {
 
   @@unique([userId, sender])
 }
+
+model ThreadMemory {
+  id       String @id @default(cuid())
+  userId   String
+  threadId String
+
+  title   String // cleaned, specific event/matter title
+  topic   String @default("other") // meeting | invoice | project_update | support | application | approval | deadline | other
+  summary String // one-sentence current state of this thread
+  status  String @default("open") // open | pending | waiting_reply | completed
+
+  nextAction String? // next concrete step the user needs to take, if any
+
+  linkedTaskId String? // primary task id for this thread (set after first task is created)
+  lastEmailId  String? // most recently processed email id
+  lastMessageAt DateTime?
+  emailCount   Int @default(0)
+
+  lastClassification String? // action | awareness | ignore | uncertain
+  participants       String  @default("[]") // JSON array of unique senders seen in thread
+
+  needsFullAnalysis Boolean @default(false) // hint: true when bodyPreview was insufficient
+  confidence        Float   @default(1.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, threadId])
+}

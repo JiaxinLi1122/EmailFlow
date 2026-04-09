@@ -1,0 +1,130 @@
+import { prisma } from '@/lib/prisma'
+
+// ============================================================
+// Thread Memory Repository — thread/matter-level memory storage
+// One record per (userId, threadId). Tracks the living state
+// of an email thread so subsequent emails can skip redundant
+// full-body analysis and avoid duplicate task creation.
+// ============================================================
+
+export type ThreadMemory = {
+  id: string
+  userId: string
+  threadId: string
+  title: string
+  topic: string
+  summary: string
+  status: string
+  nextAction: string | null
+  linkedTaskId: string | null
+  lastEmailId: string | null
+  lastMessageAt: Date | null
+  emailCount: number
+  lastClassification: string | null
+  participants: string
+  needsFullAnalysis: boolean
+  confidence: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface UpsertThreadMemoryData {
+  title: string
+  topic: string
+  summary: string
+  status: string
+  nextAction?: string | null
+  lastEmailId: string
+  lastMessageAt: Date
+  lastClassification: string
+  sender: string
+  needsFullAnalysis: boolean
+}
+
+export async function findByThread(
+  userId: string,
+  threadId: string
+): Promise<ThreadMemory | null> {
+  return prisma.threadMemory.findUnique({
+    where: { userId_threadId: { userId, threadId } },
+  })
+}
+
+export async function upsert(
+  userId: string,
+  threadId: string,
+  data: UpsertThreadMemoryData
+): Promise<ThreadMemory> {
+  const existing = await prisma.threadMemory.findUnique({
+    where: { userId_threadId: { userId, threadId } },
+    select: { participants: true },
+  })
+
+  const participants = mergeParticipants(existing?.participants ?? null, data.sender)
+
+  if (!existing) {
+    return prisma.threadMemory.create({
+      data: {
+        userId,
+        threadId,
+        title: data.title,
+        topic: data.topic,
+        summary: data.summary,
+        status: data.status,
+        nextAction: data.nextAction ?? null,
+        lastEmailId: data.lastEmailId,
+        lastMessageAt: data.lastMessageAt,
+        lastClassification: data.lastClassification,
+        participants,
+        emailCount: 1,
+        needsFullAnalysis: data.needsFullAnalysis,
+      },
+    })
+  }
+
+  return prisma.threadMemory.update({
+    where: { userId_threadId: { userId, threadId } },
+    data: {
+      title: data.title,
+      topic: data.topic,
+      summary: data.summary,
+      status: data.status,
+      nextAction: data.nextAction ?? null,
+      lastEmailId: data.lastEmailId,
+      lastMessageAt: data.lastMessageAt,
+      lastClassification: data.lastClassification,
+      participants,
+      emailCount: { increment: 1 },
+      needsFullAnalysis: data.needsFullAnalysis,
+    },
+  })
+}
+
+/**
+ * Set the primary task linked to this thread.
+ * Called once after the first task is created for a thread.
+ */
+export async function linkTask(
+  userId: string,
+  threadId: string,
+  taskId: string
+): Promise<void> {
+  await prisma.threadMemory.update({
+    where: { userId_threadId: { userId, threadId } },
+    data: { linkedTaskId: taskId },
+  })
+}
+
+// ── helpers ───────────────────────────────────────────────────
+
+function mergeParticipants(existingJson: string | null, newSender: string): string {
+  try {
+    const existing: string[] = existingJson ? JSON.parse(existingJson) : []
+    if (!existing.includes(newSender)) {
+      existing.push(newSender)
+    }
+    return JSON.stringify(existing)
+  } catch {
+    return JSON.stringify([newSender])
+  }
+}
