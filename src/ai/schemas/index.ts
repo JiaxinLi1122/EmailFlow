@@ -3,3 +3,4 @@ export { taskExtractionSchema, type TaskExtractionResult } from './task-extracti
 export { prioritySchema, type PriorityResult } from './priority'
 export { digestSchema, type DigestResult } from './digest'
 export { threadMemoryUpdateSchema, type ThreadMemoryUpdateResult } from './thread-memory'
+export { matchMatterSchema, type MatchMatterResult } from './match-matter'

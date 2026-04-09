@@ -1,21 +1,30 @@
-import { classifyEmail, extractTask, scorePriority, updateThreadMemory } from '@/ai'
+import { classifyEmail, extractTask, scorePriority, updateThreadMemory, matchMatter } from '@/ai'
 import { preFilterEmail, prepareForClassification, prepareForExtraction } from '@/ai/utils'
 import * as emailRepo from '@/repositories/email-repo'
 import * as taskRepo from '@/repositories/task-repo'
 import * as threadMemoryRepo from '@/repositories/thread-memory-repo'
+import * as matterMemoryRepo from '@/repositories/matter-memory-repo'
 import type { ThreadMemory } from '@/repositories/thread-memory-repo'
+import type { MatterMemory } from '@/repositories/matter-memory-repo'
 import { prisma } from '@/lib/prisma'
 
 // ============================================================
 // Email Pipeline — processes a single email through the full AI pipeline
 //
-// Thread memory layer (v1):
-//   - Each Gmail threadId maps to one ThreadMemory record
-//   - New emails first update thread memory, then decide if full
-//     analysis is needed
-//   - If a thread already has a linked task, new action emails
-//     attach to the existing task instead of creating a duplicate
+// Memory layers (v2):
+//   Thread layer  — one record per Gmail threadId
+//   Matter layer  — one record per underlying situation/project,
+//                   may span multiple threads
+//
+// Processing order for each new email:
+//   Pre-filter → Classify → Update thread memory →
+//   Match/create matter → Task dedup (matter > thread) →
+//   Extract → Score → Create task → Link to thread + matter
 // ============================================================
+
+// Confidence threshold for accepting an AI matter match.
+// Below this value we always create a new matter.
+const MATTER_MATCH_THRESHOLD = 0.85
 
 export interface PipelineResult {
   emailId: string
@@ -59,12 +68,13 @@ function stepPreFilter(email: { sender: string; subject: string; labels: string 
 
 /**
  * Builds the memory prefix injected into AI prompts.
- * Combines: global rules + domain rules + learned sender behavior + thread context.
+ * Priority: matter context > thread context > sender behavior > global rules.
  */
 async function buildMemoryContext(
   userId: string,
   sender: string,
-  threadMemory: ThreadMemory | null
+  threadMemory: ThreadMemory | null,
+  matterMemory: MatterMemory | null
 ): Promise<string> {
   const lines: string[] = [
     'User preferences and learned handling rules:',
@@ -96,8 +106,22 @@ async function buildMemoryContext(
     }
   }
 
-  // Thread-level context
-  if (threadMemory) {
+  // Matter-level context (highest value — spans multiple threads)
+  if (matterMemory) {
+    lines.push('')
+    lines.push('Matter context (the broader situation this email belongs to):')
+    lines.push(`- Matter: ${matterMemory.title}`)
+    lines.push(`- Topic: ${matterMemory.topic}`)
+    lines.push(`- Overall summary: ${matterMemory.summary}`)
+    lines.push(`- Status: ${matterMemory.status}`)
+    if (matterMemory.nextAction) {
+      lines.push(`- Matter-level next action: ${matterMemory.nextAction}`)
+    }
+    if (matterMemory.threadCount > 1) {
+      lines.push(`- This matter spans ${matterMemory.threadCount} email thread(s).`)
+    }
+  } else if (threadMemory) {
+    // Fall back to thread context when matter not yet known
     lines.push('')
     lines.push('Thread context (prior emails in this conversation):')
     lines.push(`- Matter: ${threadMemory.title}`)
@@ -149,10 +173,6 @@ async function stepClassify(
 
 // ── Step 2: Update thread memory ─────────────────────────────
 
-/**
- * Calls the AI to refresh the thread memory summary, then persists it.
- * Returns the updated (or newly created) thread memory record.
- */
 async function stepUpdateThreadMemory(
   userId: string,
   email: {
@@ -197,7 +217,74 @@ async function stepUpdateThreadMemory(
   })
 }
 
-// ── Step 3: Extract task ─────────────────────────────────────
+// ── Step 3: Match or create matter ───────────────────────────
+
+/**
+ * Conservative matter matching:
+ *   1. Rule-based candidate filter (topic + participants, recent window)
+ *   2. AI judgment only if candidates exist (fast model)
+ *   3. Accept only if AI confidence >= MATTER_MATCH_THRESHOLD
+ *   4. Otherwise create new matter
+ *
+ * Always returns a MatterMemory — either existing or newly created.
+ */
+async function stepMatchOrCreateMatter(
+  userId: string,
+  threadMemory: ThreadMemory,
+  threadId: string
+): Promise<MatterMemory> {
+  // Thread is already linked to a matter — just update matter stats
+  if (threadMemory.matterId) {
+    const matter = await matterMemoryRepo.findById(threadMemory.matterId)
+    if (matter) {
+      return matterMemoryRepo.updateFromThread(matter.id, threadMemory)
+    }
+    // matter was deleted — fall through to create a new one
+  }
+
+  // Find rule-based candidates
+  const candidates = await matterMemoryRepo.findCandidates(userId, {
+    topic: threadMemory.topic,
+    participants: threadMemory.participants,
+  })
+
+  let matchedMatterId: string | null = null
+
+  if (candidates.length > 0) {
+    // Ask AI to decide (conservative — prefers null)
+    const decision = await matchMatter({
+      threadTitle: threadMemory.title,
+      threadTopic: threadMemory.topic,
+      threadSummary: threadMemory.summary,
+      candidates: candidates.map((m) => ({
+        id: m.id,
+        title: m.title,
+        topic: m.topic,
+        summary: m.summary,
+        status: m.status,
+        lastMessageAt: m.lastMessageAt?.toISOString() ?? '',
+      })),
+    })
+
+    if (decision.matterId && decision.confidence >= MATTER_MATCH_THRESHOLD) {
+      matchedMatterId = decision.matterId
+    }
+  }
+
+  if (matchedMatterId) {
+    // Merge this thread into the existing matter
+    const matter = await matterMemoryRepo.mergeThread(matchedMatterId, threadMemory)
+    await threadMemoryRepo.setMatter(userId, threadId, matter.id)
+    return matter
+  }
+
+  // No confident match — create a new matter seeded from this thread
+  const newMatter = await matterMemoryRepo.createFromThread(userId, threadMemory)
+  await threadMemoryRepo.setMatter(userId, threadId, newMatter.id)
+  return newMatter
+}
+
+// ── Step 4: Extract task ─────────────────────────────────────
 
 async function stepExtractTask(
   email: {
@@ -213,14 +300,14 @@ async function stepExtractTask(
   const rawBody = email.bodyFull || email.bodyPreview
   const cleanedBody = prepareForExtraction(rawBody)
 
-  // Pass thread memory fields as thread context instead of raw email bodies
+  // Pass thread memory as lightweight thread context (avoids re-sending full bodies)
   const threadContext =
     threadMemory && threadMemory.emailCount > 1
       ? [
           {
             sender: `[thread summary: ${threadMemory.summary}]`,
             date: threadMemory.lastMessageAt?.toISOString() ?? email.receivedAt.toISOString(),
-            bodyPreview: `Status: ${threadMemory.status}${threadMemory.nextAction ? ` | Previously identified action: ${threadMemory.nextAction}` : ''}`,
+            bodyPreview: `Status: ${threadMemory.status}${threadMemory.nextAction ? ` | Next action: ${threadMemory.nextAction}` : ''}`,
           },
         ]
       : undefined
@@ -236,7 +323,7 @@ async function stepExtractTask(
   })
 }
 
-// ── Step 4: Score priority ────────────────────────────────────
+// ── Step 5: Score priority ────────────────────────────────────
 
 async function stepScorePriority(
   extraction: { title: string; summary: string; actionItems: string[] },
@@ -318,23 +405,36 @@ export async function processEmail(
     }
   }
 
-  // ── 1. Load thread memory ──────────────────────────────────
   const threadId = email.threadId ?? null
+
+  // ── 1. Load existing thread memory ────────────────────────
   const existingThreadMemory = threadId
     ? await threadMemoryRepo.findByThread(userId, threadId)
     : null
 
-  // ── 2. Build memory context (sender + thread) ──────────────
-  const memoryContext = await buildMemoryContext(userId, email.sender, existingThreadMemory)
+  // At this point we may already know the matter from an existing thread.
+  // Load it for use in memory context during classification.
+  const existingMatterMemory =
+    existingThreadMemory?.matterId
+      ? await matterMemoryRepo.findById(existingThreadMemory.matterId)
+      : null
+
+  // ── 2. Build memory context (global + sender + matter/thread) ──
+  const memoryContext = await buildMemoryContext(
+    userId,
+    email.sender,
+    existingThreadMemory,
+    existingMatterMemory
+  )
 
   // ── 3. Classify ────────────────────────────────────────────
   const classification = await stepClassify(email, memoryContext)
   await updateSenderMemory(userId, email.sender, classification.category)
 
   // ── 4. Update thread memory ────────────────────────────────
-  //    Always update so the thread summary stays current,
-  //    even for awareness / ignore emails.
+  //    Run for every non-prefiltered email, regardless of category.
   let currentThreadMemory: ThreadMemory | null = existingThreadMemory
+  let currentMatterMemory: MatterMemory | null = existingMatterMemory
 
   if (threadId) {
     currentThreadMemory = await stepUpdateThreadMemory(
@@ -344,9 +444,12 @@ export async function processEmail(
       existingThreadMemory,
       classification.category
     )
+
+    // ── 5. Match or create matter ────────────────────────────
+    currentMatterMemory = await stepMatchOrCreateMatter(userId, currentThreadMemory, threadId)
   }
 
-  // ── 5. Non-action emails: done ─────────────────────────────
+  // ── 6. Non-action emails: done ─────────────────────────────
   if (classification.category !== 'action') {
     return {
       emailId: email.id,
@@ -357,11 +460,11 @@ export async function processEmail(
     }
   }
 
-  // ── 6. Dedup: thread already has a linked task ─────────────
-  //    Attach this email to the existing task instead of
-  //    creating a duplicate.
-  if (currentThreadMemory?.linkedTaskId) {
-    const existingTaskId = currentThreadMemory.linkedTaskId
+  // ── 7. Task dedup — matter level (broadest check) ─────────
+  //    If this matter already has a primary task, link the
+  //    email as a follow-up instead of creating a duplicate.
+  if (currentMatterMemory?.linkedPrimaryTaskId) {
+    const existingTaskId = currentMatterMemory.linkedPrimaryTaskId
 
     try {
       await prisma.taskEmail.create({
@@ -372,7 +475,7 @@ export async function processEmail(
         },
       })
     } catch {
-      // unique constraint — email already linked, that's fine
+      // unique constraint — already linked, fine
     }
 
     return {
@@ -385,13 +488,39 @@ export async function processEmail(
     }
   }
 
-  // ── 7. Extract task ────────────────────────────────────────
+  // ── 8. Task dedup — thread level (fallback for no-threadId emails) ──
+  if (currentThreadMemory?.linkedTaskId) {
+    const existingTaskId = currentThreadMemory.linkedTaskId
+
+    try {
+      await prisma.taskEmail.create({
+        data: {
+          taskId: existingTaskId,
+          emailId: email.id,
+          relationship: 'follow_up',
+        },
+      })
+    } catch {
+      // unique constraint — already linked, fine
+    }
+
+    return {
+      emailId: email.id,
+      classification: classification.category,
+      confidence: classification.confidence,
+      taskCreated: false,
+      taskId: existingTaskId,
+      skippedByRule: false,
+    }
+  }
+
+  // ── 9. Extract task ────────────────────────────────────────
   const extraction = await stepExtractTask(email, memoryContext, currentThreadMemory)
 
-  // ── 8. Score priority ──────────────────────────────────────
+  // ── 10. Score priority ─────────────────────────────────────
   const priority = await stepScorePriority(extraction, email.sender, memoryContext)
 
-  // ── 9. Create task ─────────────────────────────────────────
+  // ── 11. Create task ────────────────────────────────────────
   const task = await taskRepo.createTask({
     userId,
     emailId: email.id,
@@ -399,9 +528,13 @@ export async function processEmail(
     priority,
   })
 
-  // ── 10. Link task to thread memory ────────────────────────
+  // ── 12. Link task to thread + matter ──────────────────────
   if (threadId && currentThreadMemory) {
     await threadMemoryRepo.linkTask(userId, threadId, task.id)
+  }
+
+  if (currentMatterMemory && !currentMatterMemory.linkedPrimaryTaskId) {
+    await matterMemoryRepo.linkPrimaryTask(currentMatterMemory.id, task.id)
   }
 
   return {

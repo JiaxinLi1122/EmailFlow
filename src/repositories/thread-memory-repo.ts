@@ -16,6 +16,7 @@ export type ThreadMemory = {
   summary: string
   status: string
   nextAction: string | null
+  matterId: string | null
   linkedTaskId: string | null
   lastEmailId: string | null
   lastMessageAt: Date | null
@@ -112,6 +113,21 @@ export async function linkTask(
   await prisma.threadMemory.update({
     where: { userId_threadId: { userId, threadId } },
     data: { linkedTaskId: taskId },
+  })
+}
+
+/**
+ * Associate a thread with a matter.
+ * Called after matter matching succeeds or a new matter is created.
+ */
+export async function setMatter(
+  userId: string,
+  threadId: string,
+  matterId: string
+): Promise<void> {
+  await prisma.threadMemory.update({
+    where: { userId_threadId: { userId, threadId } },
+    data: { matterId },
   })
 }
 

@@ -166,6 +166,32 @@ model SenderMemory {
   @@unique([userId, sender])
 }
 
+model MatterMemory {
+  id     String @id @default(cuid())
+  userId String
+
+  title      String // cleaned, specific matter title
+  topic      String @default("other") // meeting | invoice | project_update | support | application | approval | deadline | other
+  summary    String // one-sentence current state of this matter
+  status     String @default("open") // open | pending | waiting_reply | completed
+  nextAction String? // most important next step across all threads in this matter
+
+  linkedPrimaryTaskId String? // the primary task representing this matter
+  lastEmailId         String? // most recently processed email id
+  lastMessageAt       DateTime?
+  threadCount         Int @default(0) // how many threads are grouped here
+  emailCount          Int @default(0) // total emails processed across all threads
+
+  lastClassification String? // classification of most recent email
+  participants       String  @default("[]") // JSON array of unique senders seen across all threads
+  keywords           String  @default("[]") // JSON array of key terms for rule-based matching
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  threads ThreadMemory[] // threads that belong to this matter
+}
+
 model ThreadMemory {
   id       String @id @default(cuid())
   userId   String
@@ -178,6 +204,7 @@ model ThreadMemory {
 
   nextAction String? // next concrete step the user needs to take, if any
 
+  matterId     String? // FK to MatterMemory (null until matter matching runs)
   linkedTaskId String? // primary task id for this thread (set after first task is created)
   lastEmailId  String? // most recently processed email id
   lastMessageAt DateTime?
@@ -191,6 +218,8 @@ model ThreadMemory {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  matter MatterMemory? @relation(fields: [matterId], references: [id])
 
   @@unique([userId, threadId])
 }
