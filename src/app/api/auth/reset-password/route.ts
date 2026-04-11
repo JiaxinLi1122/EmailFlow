@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, verifyPassword } from '@/lib/auth-password'
+import { hashResetToken } from '@/lib/password-reset'
 
 export async function POST(req: Request) {
   try {
@@ -27,28 +28,16 @@ export async function POST(req: Request) {
       )
     }
 
+    const tokenHash = hashResetToken(token)
     const record = await prisma.passwordResetToken.findUnique({
-      where: { token },
+      where: { tokenHash },
       include: { user: true },
     })
 
-    if (!record) {
+    // Normalize token state errors to avoid leaking information
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
       return NextResponse.json(
-        { success: false, error: 'Invalid or expired reset token' },
-        { status: 400 }
-      )
-    }
-
-    if (record.usedAt) {
-      return NextResponse.json(
-        { success: false, error: 'This reset link has already been used' },
-        { status: 400 }
-      )
-    }
-
-    if (record.expiresAt < new Date()) {
-      return NextResponse.json(
-        { success: false, error: 'This reset link has expired' },
+        { success: false, error: 'Invalid or expired reset link' },
         { status: 400 }
       )
     }
