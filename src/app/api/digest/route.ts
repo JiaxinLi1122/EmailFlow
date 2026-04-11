@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic"
 import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
 import { getAuthUser, success, error } from '@/lib/api-helpers'
-import { createDailyDigest } from '@/services/digest-service'
+import { createDailyDigest, createWeeklyDigest } from '@/workflows/digest-pipeline'
 import * as digestRepo from '@/repositories/digest-repo'
 
 const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
@@ -31,12 +31,19 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/digest — generate a new digest
-export async function POST() {
+// Body: { period?: 'daily' | 'weekly' }  — defaults to 'daily'
+export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser()
     if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
 
-    const digest = await createDailyDigest(user.id)
+    const body = await req.json().catch(() => ({}))
+    const period = body.period === 'weekly' ? 'weekly' : 'daily'
+
+    const digest = period === 'weekly'
+      ? await createWeeklyDigest(user.id)
+      : await createDailyDigest(user.id)
+
     return success(digest)
   } catch (err: any) {
     console.error('[api/digest POST]', err)

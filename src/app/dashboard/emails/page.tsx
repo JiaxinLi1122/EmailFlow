@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/page-header'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
 import {
-  Paperclip, Mail, CheckSquare, AlertTriangle, Trash2, Eye,
+  AlertTriangle, CheckSquare, Paperclip, Mail,
   Search, CalendarIcon, X, ChevronDown, FolderOpen,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
@@ -17,20 +17,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { format } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
-
-const classColors: Record<string, string> = {
-  action: 'bg-red-50 text-red-700 border-red-200',
-  awareness: 'bg-blue-50 text-blue-700 border-blue-200',
-  ignore: 'bg-gray-50 text-gray-500 border-gray-200',
-  uncertain: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-}
-
-const classIcons: Record<string, typeof Mail> = {
-  action: CheckSquare,
-  awareness: Eye,
-  ignore: Trash2,
-  uncertain: AlertTriangle,
-}
+import { getEmailClassConfig } from '@/lib/email-classification'
 
 type Tab = 'actionable' | 'informational' | 'all'
 type EmailClassification = 'action' | 'awareness' | 'ignore' | 'uncertain'
@@ -146,11 +133,11 @@ export default function EmailsPage() {
 
     if (tab === 'actionable') {
       result = result.filter((e) =>
-        e.classification === 'action' || e.classification === 'uncertain' || e.taskLinks?.length > 0
+        e.classification === 'action' || e.classification === 'uncertain' || (e.taskLinks?.length ?? 0) > 0
       )
     } else if (tab === 'informational') {
       result = result.filter((e) =>
-        (e.classification === 'awareness' || e.classification === 'ignore') && !(e.taskLinks?.length > 0)
+        (e.classification === 'awareness' || e.classification === 'ignore') && !((e.taskLinks?.length ?? 0) > 0)
       )
     }
 
@@ -186,8 +173,8 @@ export default function EmailsPage() {
     if (tab === 'informational') {
       result = [...result].sort((a, b) => {
         const rankDiff =
-          (informationalPriority[a.classification] ?? 99) -
-          (informationalPriority[b.classification] ?? 99)
+          (informationalPriority[a.classification ?? ''] ?? 99) -
+          (informationalPriority[b.classification ?? ''] ?? 99)
 
         if (rankDiff !== 0) {
           return rankDiff
@@ -205,10 +192,10 @@ export default function EmailsPage() {
 
   // Counts for tab badges
   const actionableCount = emails.filter((e) =>
-    e.classification === 'action' || e.classification === 'uncertain' || e.taskLinks?.length > 0
+    e.classification === 'action' || e.classification === 'uncertain' || (e.taskLinks?.length ?? 0) > 0
   ).length
   const infoCount = emails.filter((e) =>
-    (e.classification === 'awareness' || e.classification === 'ignore') && !(e.taskLinks?.length > 0)
+    (e.classification === 'awareness' || e.classification === 'ignore') && !((e.taskLinks?.length ?? 0) > 0)
   ).length
 
   const tabs: { key: Tab; label: string; count: number }[] = [
@@ -426,7 +413,7 @@ export default function EmailsPage() {
       )}
 
       {/* Pagination */}
-      {meta && meta.totalPages > 1 && (
+      {meta && (meta.totalPages ?? 0) > 1 && (
         <div className="flex items-center justify-center gap-2 pt-4">
           <Button
             variant="outline"
@@ -440,7 +427,7 @@ export default function EmailsPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={page >= meta.totalPages}
+            disabled={page >= (meta.totalPages ?? 1)}
             onClick={() => setPage((p) => p + 1)}
           >
             Next
@@ -491,7 +478,7 @@ function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: Ma
     }
     const needsAttn = (emailList: EmailItem[]) =>
       emailList.filter(
-        (e) => (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length > 0)
+        (e) => (e.classification === 'action' || e.classification === 'uncertain') && !((e.taskLinks?.length ?? 0) > 0)
       ).length
 
     const groups = Array.from(grouped.values()).sort((a, b) => {
@@ -531,7 +518,7 @@ function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: Ma
 
   const attentionCount = (emailList: EmailItem[]) =>
     emailList.filter(
-      (e) => (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length > 0)
+      (e) => (e.classification === 'action' || e.classification === 'uncertain') && !((e.taskLinks?.length ?? 0) > 0)
     ).length
 
   return (
@@ -629,7 +616,7 @@ function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: Ma
 
 /* ========== EMAIL ROW - shows linked tasks as badges ========== */
 function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
-  const linkedTasks = email.taskLinks?.map((link) => link.task).filter(Boolean) || []
+  const linkedTasks = email.taskLinks?.map((link) => link.task).filter((t): t is LinkedTask => t != null) || []
   const needsAttention =
     (email.classification === 'action' || email.classification === 'uncertain') &&
     linkedTasks.length === 0
@@ -678,12 +665,13 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
 }
 
 /* ========== SHARED COMPONENTS ========== */
-function ClassBadge({ classification }: { classification: string }) {
-  const Icon = classIcons[classification] || Mail
+function ClassBadge({ classification }: { classification?: string | null }) {
+  const cfg = getEmailClassConfig(classification)
+  const Icon = cfg.icon
   return (
-    <Badge variant="outline" className={`w-[84px] justify-center gap-1 text-[10px] ${classColors[classification || 'uncertain']}`}>
+    <Badge variant="outline" className={`w-[84px] justify-center gap-1 text-[10px] ${cfg.color}`}>
       <Icon className="h-3 w-3" />
-      {classification || 'pending'}
+      {cfg.label.split(' ')[0]}
     </Badge>
   )
 }

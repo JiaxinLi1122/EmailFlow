@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   BarChart3,
+  ListTodo,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
@@ -29,6 +30,8 @@ type DigestStats = {
   awarenessCount?: number
   unresolvedCount?: number
   ignoredCount?: number
+  taskTotal?: number
+  taskPending?: number
 }
 
 type DigestRecord = {
@@ -49,8 +52,13 @@ export default function DigestPage() {
     queryFn: () => fetch('/api/digest?limit=20').then((r) => r.json()),
   })
 
+
   const generateDigest = useMutation({
-    mutationFn: () => fetch('/api/digest', { method: 'POST' }).then((r) => r.json()),
+    mutationFn: () => fetch('/api/digest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period: activePeriod }),
+    }).then((r) => r.json()),
     onSuccess: (data) => {
       if (data.success) {
         queryClient.invalidateQueries({ queryKey: ['digests'] })
@@ -158,6 +166,8 @@ export default function DigestPage() {
 
 function DigestHighlight({ digest }: { digest: DigestRecord }) {
   const stats = parseStats(digest.stats)
+  const taskTotal = stats.taskTotal || 0
+  const taskPending = stats.taskPending || 0
 
   const cards = [
     {
@@ -217,6 +227,18 @@ function DigestHighlight({ digest }: { digest: DigestRecord }) {
           </Card>
         ))}
       </div>
+
+      {taskTotal > 0 && (
+        <div className="mt-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3">
+          <ListTodo className="h-4 w-4 shrink-0 text-gray-400" />
+          <p className="text-sm text-gray-600">
+            <span className="font-semibold text-gray-900">{taskTotal} task{taskTotal !== 1 ? 's' : ''}</span> extracted from this period
+            {taskPending > 0 ? (
+              <> — <span className="font-semibold text-yellow-700">{taskPending}</span> pending confirmation</>
+            ) : ' — all confirmed or processed'}
+          </p>
+        </div>
+      )}
 
       {(stats.actionCount || 0) > 0 ? (
         <div className="mt-3 flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3">
@@ -309,7 +331,16 @@ function DigestCard({ digest, isLatest }: { digest: DigestRecord; isLatest: bool
 
 function parseStats(raw: string | DigestStats | null | undefined): DigestStats {
   try {
-    return typeof raw === 'string' ? JSON.parse(raw) : raw || {}
+    const parsed: Record<string, number> = typeof raw === 'string' ? JSON.parse(raw) : raw || {}
+    return {
+      // new field names (from updated pipeline)
+      actionCount:    parsed.actionCount    ?? parsed.actionTasks    ?? 0,
+      awarenessCount: parsed.awarenessCount ?? parsed.awarenessEmails ?? 0,
+      unresolvedCount:parsed.unresolvedCount ?? 0,
+      ignoredCount:   parsed.ignoredCount   ?? parsed.ignoredEmails  ?? 0,
+      taskTotal:      parsed.taskTotal      ?? parsed.standaloneTasks ?? 0,
+      taskPending:    parsed.taskPending    ?? 0,
+    }
   } catch {
     return {}
   }

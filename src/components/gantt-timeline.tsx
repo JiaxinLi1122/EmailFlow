@@ -13,6 +13,20 @@ const COL_WIDTH = 48
 const ROW_HEIGHT = 60
 const LABEL_WIDTH = 240
 const HANDLE_WIDTH = 10
+const MONTH_OPTIONS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
 function toDateStr(d: Date) {
   const y = d.getFullYear()
@@ -55,6 +69,9 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
   const today = useMemo(() => startOfDay(new Date()), [])
   const [rangeStart, setRangeStart] = useState(() => addDays(today, -3))
   const totalDays = 21
+  const rangeYear = rangeStart.getFullYear()
+  const rangeMonth = rangeStart.getMonth()
+  const yearOptions = Array.from({ length: 9 }, (_, index) => rangeYear - 4 + index)
 
   const days = useMemo(() => {
     const arr: Date[] = []
@@ -244,8 +261,8 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
   const rangeLabel = `${formatShort(rangeStart)} — ${formatShort(rangeEnd)}, ${rangeEnd.getFullYear()}`
 
   return (
-    <Card>
-      <CardContent className="py-4">
+    <Card className="border-gray-200/80 bg-white/95 shadow-sm">
+      <CardContent className="min-w-0 overflow-hidden py-4">
         {/* Controls */}
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -259,10 +276,36 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-          <span className="text-xs text-gray-400">{rangeLabel}</span>
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="Select timeline year"
+              value={rangeYear}
+              onChange={(e) => setRangeStart(new Date(Number(e.target.value), rangeMonth, 1))}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
+            >
+              {yearOptions.map((optionYear) => (
+                <option key={optionYear} value={optionYear}>
+                  {optionYear}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Select timeline month"
+              value={rangeMonth}
+              onChange={(e) => setRangeStart(new Date(rangeYear, Number(e.target.value), 1))}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
+            >
+              {MONTH_OPTIONS.map((monthName, index) => (
+                <option key={monthName} value={index}>
+                  {monthName}
+                </option>
+              ))}
+            </select>
+            <span className="hidden text-xs text-gray-400 lg:inline">{rangeLabel}</span>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="max-w-full overflow-x-auto pb-1">
           <div style={{ minWidth: LABEL_WIDTH + gridWidth }} className="select-none">
             {/* Day headers */}
             <div className="flex border-b" style={{ height: 40 }}>

@@ -20,20 +20,14 @@ import { PageHeader } from '@/components/page-header'
 import { StatePanel } from '@/components/state-panel'
 import {
   ArrowLeft, Mail, Paperclip, Clock, ArrowUpRight,
-  CheckSquare, AlertTriangle, Eye, Trash2, Sparkles, Shield, Plus, Tag, X,
+  CheckSquare, Sparkles, Shield, Plus, Tag, X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
+import { EMAIL_CLASS_CONFIG, getEmailClassConfig } from '@/lib/email-classification'
 import { toast } from 'sonner'
-
-const classConfig: Record<string, { label: string; color: string; bg: string; icon: typeof Mail }> = {
-  action: { label: 'Action Required', color: 'bg-red-50 text-red-700 border-red-200', bg: 'from-red-50/50 to-white', icon: CheckSquare },
-  awareness: { label: 'Awareness / FYI', color: 'bg-blue-50 text-blue-700 border-blue-200', bg: 'from-blue-50/50 to-white', icon: Eye },
-  ignore: { label: 'Low Priority', color: 'bg-gray-50 text-gray-500 border-gray-200', bg: 'from-gray-50/50 to-white', icon: Trash2 },
-  uncertain: { label: 'Needs Review', color: 'bg-yellow-50 text-yellow-700 border-yellow-200', bg: 'from-yellow-50/50 to-white', icon: AlertTriangle },
-}
 
 type EmailTaskLink = {
   id: string
@@ -76,7 +70,7 @@ export default function EmailDetailPage() {
       if (res.ok) {
         queryClient.invalidateQueries({ queryKey: ['email', emailId] })
         queryClient.invalidateQueries({ queryKey: ['emails'] })
-        toast.success(`Marked as ${classConfig[newClass]?.label || newClass}`)
+        toast.success(`Marked as ${getEmailClassConfig(newClass).label}`)
       }
     } catch {
       toast.error('Failed to update classification')
@@ -105,11 +99,6 @@ export default function EmailDetailPage() {
   }
 
   const handleCreateTask = async () => {
-    if (!taskTitle.trim()) {
-      toast.error('Task title is required')
-      return
-    }
-
     setCreatingTask(true)
     try {
       const res = await fetch('/api/emails/create-task', {
@@ -174,7 +163,7 @@ export default function EmailDetailPage() {
     )
   }
 
-  const cls = classConfig[email.classification] || classConfig.uncertain
+  const cls = getEmailClassConfig(email.classification)
   const ClsIcon = cls.icon
   const senderName = email.sender?.split('<')[0]?.trim()
   const senderEmail = email.sender?.match(/<(.+?)>/)?.[1] || email.sender
@@ -393,7 +382,7 @@ export default function EmailDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {Object.entries(classConfig).map(([key, config]) => (
+              {Object.entries(EMAIL_CLASS_CONFIG).map(([key, config]) => (
                 <Button
                   key={key}
                   variant={email.classification === key ? 'default' : 'outline'}

@@ -1,12 +1,15 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertTriangle,
   BarChart3,
   CheckSquare,
   Clock,
+  Loader2,
   Mail,
   PieChart,
   Target,
@@ -17,7 +20,9 @@ import { PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
+import { getEmailClassConfig } from '@/lib/email-classification'
 import { useAuth } from '@/lib/use-auth'
 
 type DashboardTask = {
@@ -41,6 +46,30 @@ type DashboardEmail = {
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [showSyncModal, setShowSyncModal] = useState(() => searchParams.get('gmail_connected') === '1')
+  const [syncSetupLoading, setSyncSetupLoading] = useState<number | null>(null)
+
+  async function handleSyncSetup(days: number) {
+    setSyncSetupLoading(days)
+    try {
+      await fetch('/api/settings/sync-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      })
+    } finally {
+      setSyncSetupLoading(null)
+      setShowSyncModal(false)
+      router.replace('/dashboard', { scroll: false })
+    }
+  }
+
+  function handleSyncSkip() {
+    setShowSyncModal(false)
+    router.replace('/dashboard', { scroll: false })
+  }
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
@@ -82,7 +111,7 @@ export default function DashboardPage() {
 
   const attentionEmails = allEmails
     .filter((email) =>
-      (email.classification === 'action' || email.classification === 'uncertain') && !(email.taskLinks?.length > 0)
+      (email.classification === 'action' || email.classification === 'uncertain') && !((email.taskLinks?.length ?? 0) > 0)
     )
     .slice(0, 5)
 
@@ -324,10 +353,8 @@ export default function DashboardPage() {
                         <p className="truncate text-sm font-medium text-gray-900">{email.subject}</p>
                         <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
                       </div>
-                      <Badge variant="outline" className={`shrink-0 text-[10px] ${
-                        email.classification === 'action' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                      }`}>
-                        {email.classification === 'action' ? 'Action' : 'Uncertain'}
+                      <Badge variant="outline" className={`shrink-0 text-[10px] ${getEmailClassConfig(email.classification).color}`}>
+                        {getEmailClassConfig(email.classification).label.split(' ')[0]}
                       </Badge>
                     </Link>
                   ))}
@@ -347,9 +374,13 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {confirmedTasks.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
-              No confirmed tasks yet. Review pending tasks or sync your email to get started.
-            </p>
+            <div className="flex flex-col items-center gap-2 py-8 text-center">
+              <CheckSquare className="h-8 w-8 text-gray-200" />
+              <p className="text-sm text-gray-400">No confirmed tasks yet.</p>
+              <Link href="/dashboard/tasks">
+                <Button variant="outline" size="sm">Review tasks</Button>
+              </Link>
+            </div>
           ) : (
             <div className="space-y-3">
               {confirmedTasks.map((task: DashboardTask) => {
@@ -367,7 +398,7 @@ export default function DashboardPage() {
                     <div className="ml-3 flex items-center gap-2">
                       {(task.explicitDeadline || task.inferredDeadline || task.userSetDeadline) && (
                         <span className="text-xs text-gray-400">
-                          Due {new Date(task.userSetDeadline || task.explicitDeadline || task.inferredDeadline).toLocaleDateString()}
+                          Due {new Date(task.userSetDeadline ?? task.explicitDeadline ?? task.inferredDeadline ?? '').toLocaleDateString()}
                         </span>
                       )}
                       <Badge variant="outline" className={getPriorityColor(band)}>
@@ -381,6 +412,48 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+      {/* First-login sync setup modal */}
+      <Dialog open={showSyncModal} onOpenChange={setShowSyncModal}>
+        <DialogContent showCloseButton={false} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Set your sync range</DialogTitle>
+            <DialogDescription>
+              How far back should EmailFlow pull your email? You can change this anytime in Settings.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-2">
+            {([7, 15, 30] as const).map((days) => {
+              const from = new Date(Date.now() - days * 86400000)
+              return (
+                <button
+                  key={days}
+                  onClick={() => handleSyncSetup(days)}
+                  disabled={syncSetupLoading !== null}
+                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-blue-200 hover:bg-blue-50/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Last {days} days</p>
+                    <p className="text-xs text-gray-500">From {from.toLocaleDateString()}</p>
+                  </div>
+                  {syncSetupLoading === days ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                  ) : (
+                    <div className="h-4 w-4 rounded-full border-2 border-gray-200" />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={handleSyncSkip}
+            className="text-center text-xs text-gray-400 transition-colors hover:text-gray-600"
+          >
+            Skip — use default (15 days)
+          </button>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

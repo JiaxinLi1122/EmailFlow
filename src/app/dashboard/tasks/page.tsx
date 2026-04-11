@@ -98,6 +98,21 @@ const STATUS_OPTIONS = [
   { value: 'dismissed', label: 'Dismissed' },
 ]
 
+const MONTH_OPTIONS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
 export default function TasksPage() {
   const router = useRouter()
   const [statusFilter, setStatusFilter] = useState('all')
@@ -184,7 +199,7 @@ export default function TasksPage() {
   const tasks: TaskItem[] = (res as QueryResponse<TaskItem[]>)?.data || []
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 [scrollbar-gutter:stable]">
       <PageHeader
         title="Tasks"
         description="Track what needs review, what is active, and what is already done."
@@ -211,43 +226,49 @@ export default function TasksPage() {
       {/* Filter bar */}
       <div className="rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <SegmentedControl
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={STATUS_OPTIONS}
-        />
+          <SegmentedControl
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_OPTIONS}
+          />
 
-        <SegmentedControl
-          value={sortBy}
-          onChange={setSortBy}
-          options={[
-            { value: 'priority', label: 'Priority' },
-            { value: 'deadline', label: 'Deadline' },
-          ]}
-        />
+          <div className="flex min-h-7 justify-start sm:min-w-[180px] sm:justify-end">
+            {viewMode !== 'calendar' ? (
+              <SegmentedControl
+                value={sortBy}
+                onChange={setSortBy}
+                options={[
+                  { value: 'priority', label: 'Priority' },
+                  { value: 'deadline', label: 'Deadline' },
+                ]}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
       {/* Content */}
-      {isLoading ? (
-        <StatePanel
-          loading
-          title="Loading tasks"
-          description="Pulling together your current work items."
-        />
-      ) : tasks.length === 0 ? (
-        <StatePanel
-          icon={<FolderOpen className="h-5 w-5 text-gray-400" />}
-          title="No tasks found"
-          description="Try a different filter or create a task manually."
-        />
-      ) : viewMode === 'list' ? (
-        <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
-      ) : viewMode === 'timeline' ? (
-        <GanttTimeline tasks={tasks} updateTask={updateTask} sortBy={sortBy} />
-      ) : (
-        <TaskCalendarView tasks={tasks} updateTask={updateTask} />
-      )}
+      <div className="min-w-0">
+        {isLoading ? (
+          <StatePanel
+            loading
+            title="Loading tasks"
+            description="Pulling together your current work items."
+          />
+        ) : tasks.length === 0 ? (
+          <StatePanel
+            icon={<FolderOpen className="h-5 w-5 text-gray-400" />}
+            title="No tasks found"
+            description="Try a different filter or create a task manually."
+          />
+        ) : viewMode === 'list' ? (
+          <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
+        ) : viewMode === 'timeline' ? (
+          <GanttTimeline tasks={tasks} updateTask={updateTask} sortBy={sortBy} />
+        ) : (
+          <TaskCalendarView tasks={tasks} updateTask={updateTask} />
+        )}
+      </div>
 
       {/* Create Task Modal */}
       <Dialog open={showCreateModal} onOpenChange={handleModalOpenChange}>
@@ -533,7 +554,7 @@ function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLik
           ? 'border-purple-200 bg-purple-50/30 hover:border-purple-300 hover:shadow-md py-3.5'
           : isDone
           ? 'border-gray-100 bg-gray-50/50 py-2.5 opacity-60 hover:opacity-80'
-          : 'bg-white hover:border-gray-300 hover:shadow-md py-3.5'
+          : 'border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-sm py-3.5'
       }`}
     >
       {/* Quick-complete checkbox */}
@@ -666,6 +687,7 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1))
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1))
+  const yearOptions = Array.from({ length: 9 }, (_, index) => year - 4 + index)
 
   const todayStr = new Date().toDateString()
 
@@ -680,6 +702,11 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
       if (!map[key]) map[key] = []
       map[key].push(task)
     }
+
+    for (const key of Object.keys(map)) {
+      map[key].sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0))
+    }
+
     return map
   }, [tasks])
 
@@ -700,8 +727,6 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
       }
     }
   }, [updateTask])
-
-  const monthLabel = currentMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })
 
   // Build calendar cells with overflow days
   type CellData = { day: number; date: Date; isCurrentMonth: boolean }
@@ -729,7 +754,32 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
           <Button variant="ghost" size="sm" onClick={prevMonth}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <h2 className="text-lg font-semibold text-gray-900">{monthLabel}</h2>
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="Select year"
+              value={year}
+              onChange={(e) => setCurrentMonth(new Date(Number(e.target.value), month, 1))}
+              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
+            >
+              {yearOptions.map((optionYear) => (
+                <option key={optionYear} value={optionYear}>
+                  {optionYear}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Select month"
+              value={month}
+              onChange={(e) => setCurrentMonth(new Date(year, Number(e.target.value), 1))}
+              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
+            >
+              {MONTH_OPTIONS.map((monthName, index) => (
+                <option key={monthName} value={index}>
+                  {monthName}
+                </option>
+              ))}
+            </select>
+          </div>
           <Button variant="ghost" size="sm" onClick={nextMonth}>
             <ChevronRight className="h-4 w-4" />
           </Button>

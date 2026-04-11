@@ -8,7 +8,6 @@ export {
   classifyEmail,
   extractTask,
   scorePriority,
-  generateDigest,
   updateThreadMemory,
   matchMatter,
 } from './skills'
@@ -17,7 +16,6 @@ export type {
   ClassifyEmailInput,
   ExtractTaskInput,
   ScorePriorityInput,
-  GenerateDigestInput,
   UpdateThreadMemoryInput,
   MatchMatterInput,
 } from './skills'
@@ -27,7 +25,6 @@ export {
   classificationSchema,
   taskExtractionSchema,
   prioritySchema,
-  digestSchema,
   threadMemoryUpdateSchema,
   matchMatterSchema,
 } from './schemas'
@@ -36,7 +33,6 @@ export type {
   ClassificationResult,
   TaskExtractionResult,
   PriorityResult,
-  DigestResult,
   ThreadMemoryUpdateResult,
   MatchMatterResult,
 } from './schemas'

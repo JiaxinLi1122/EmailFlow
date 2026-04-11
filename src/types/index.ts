@@ -21,7 +21,6 @@ export type {
   ClassificationResult,
   TaskExtractionResult,
   PriorityResult,
-  DigestResult,
 } from '@/ai/schemas'
 
 // Legacy aliases

@@ -5,15 +5,14 @@ import { useAuth } from '@/lib/use-auth'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InlineNotice } from '@/components/inline-notice'
 import { PageHeader } from '@/components/page-header'
 import {
+  CalendarIcon,
   Clock3,
-  Eye,
-  EyeOff,
   KeyRound,
   Loader2,
   Lock,
@@ -32,11 +31,13 @@ type CurrentUser = {
   syncStartDate?: string | null
 }
 
-const SYNC_PRESETS = [7, 15, 30, 90]
+const SYNC_PRESETS = [7, 15, 30] as const
 
 export default function SettingsPage() {
   const { user, logout } = useAuth()
   const queryClient = useQueryClient()
+  const [syncPickerOpen, setSyncPickerOpen] = useState(false)
+  const [pendingDate, setPendingDate] = useState<Date | undefined>()
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -52,6 +53,7 @@ export default function SettingsPage() {
   const syncData = stats?.data?.sync
   const gmailConnected = Boolean(syncData?.gmailConnected)
   const connectedGmail = currentUser?.gmailEmail || null
+  const currentSyncStartDate = currentUser?.syncStartDate ? new Date(currentUser.syncStartDate) : null
 
   const syncSummary = (() => {
     if (!currentUser?.syncStartDate) {
@@ -67,7 +69,7 @@ export default function SettingsPage() {
     const startDate = new Date(currentUser.syncStartDate)
     const diffMs = Math.max(0, now.getTime() - startDate.getTime())
     const days = Math.max(1, Math.round(diffMs / 86400000))
-    const exactPreset = SYNC_PRESETS.includes(days) ? days : null
+    const exactPreset = SYNC_PRESETS.includes(days as (typeof SYNC_PRESETS)[number]) ? days : null
 
     return {
       days,
@@ -97,7 +99,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Disconnect failed')
+      toast.error(err.message || 'Failed to disconnect Gmail')
     },
   })
 
@@ -123,11 +125,14 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to update sync range')
+      toast.error(err.message || 'Failed to update sync window')
     },
   })
 
   const isBusy = disconnectMutation.isPending || syncRangeMutation.isPending
+  const pendingDays = pendingDate
+    ? Math.max(1, Math.round((Date.now() - pendingDate.getTime()) / 86400000))
+    : null
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -252,11 +257,84 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-900">Choose how far back new syncs should look</p>
-            <p className="text-xs text-gray-500">
-              Changing this only affects future sync runs. Pick a wider window when you want to backfill older email.
-            </p>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Change sync date</p>
+              <p className="text-xs text-gray-500">Quick presets are fastest. Use a custom date when you want a one-off backfill.</p>
+            </div>
+            <Popover
+              open={syncPickerOpen}
+              onOpenChange={(open) => {
+                setSyncPickerOpen(open)
+                if (open) {
+                  setPendingDate(currentSyncStartDate || undefined)
+                } else {
+                  setPendingDate(undefined)
+                }
+              }}
+            >
+              <PopoverTrigger className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 transition-all hover:border-blue-200 hover:bg-blue-50/70 hover:text-blue-700">
+                <CalendarIcon className="h-3.5 w-3.5" />
+                Pick date
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-auto overflow-hidden rounded-2xl border border-gray-200 p-0 shadow-lg">
+                <div className="border-b border-gray-100 px-4 py-3">
+                  <p className="text-sm font-medium text-gray-900">Choose a sync start date</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    The next sync will start from this date and pull newer email forward from there.
+                  </p>
+                </div>
+                <Calendar
+                  mode="single"
+                  selected={pendingDate}
+                  onSelect={setPendingDate}
+                  captionLayout="dropdown"
+                  disabled={(date) => date > new Date() || date < new Date(Date.now() - 365 * 86400000)}
+                />
+                <div className="border-t border-gray-100 bg-blue-50/40 px-4 py-3">
+                  <p className="text-xs font-medium text-blue-900">
+                    {pendingDate
+                      ? `Selected start date: ${pendingDate.toLocaleDateString()}`
+                      : 'Pick a start date to preview the next sync window.'}
+                  </p>
+                  <p className="mt-1 text-xs text-blue-800/80">
+                    {pendingDays
+                      ? `This is about the last ${pendingDays} day${pendingDays === 1 ? '' : 's'} of email.`
+                      : 'You can choose any date from the last 12 months.'}
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSyncPickerOpen(false)
+                      setPendingDate(undefined)
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={!pendingDate || syncRangeMutation.isPending}
+                    onClick={() => {
+                      if (!pendingDate) return
+                      const days = Math.max(1, Math.round((Date.now() - pendingDate.getTime()) / 86400000))
+                      syncRangeMutation.mutate(days, {
+                        onSettled: () => {
+                          setSyncPickerOpen(false)
+                          setPendingDate(undefined)
+                        },
+                      })
+                    }}
+                  >
+                    {syncRangeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    Apply
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -272,9 +350,6 @@ export default function SettingsPage() {
                   onClick={() => syncRangeMutation.mutate(days)}
                   disabled={isBusy}
                 >
-                  {syncRangeMutation.isPending && isActive ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : null}
                   {days} days
                 </Button>
               )
@@ -326,90 +401,27 @@ export default function SettingsPage() {
 }
 
 function PasswordCard() {
-  const [mode, setMode] = useState<'idle' | 'change'>('idle')
-  const [resetSent, setResetSent] = useState(false)
-  const [currentPw, setCurrentPw] = useState('')
-  const [newPw, setNewPw] = useState('')
-  const [confirmPw, setConfirmPw] = useState('')
-  const [showCurrent, setShowCurrent] = useState(false)
-  const [showNew, setShowNew] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [isChanging, setIsChanging] = useState(false)
-  const [isSendingReset, setIsSendingReset] = useState(false)
 
-  function resetForm() {
-    setCurrentPw('')
-    setNewPw('')
-    setConfirmPw('')
-    setShowCurrent(false)
-    setShowNew(false)
-    setShowConfirm(false)
+  async function handleChangePassword() {
     setError('')
-    setMode('idle')
-  }
-
-  async function handleChangePassword(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setError('')
-    setResetSent(false)
-
-    if (newPw.length < 8) {
-      setError('New password must be at least 8 characters long.')
-      return
-    }
-
-    if (newPw !== confirmPw) {
-      setError('New password and confirmation do not match.')
-      return
-    }
-
-    setIsChanging(true)
-    try {
-      const res = await fetch('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          currentPassword: currentPw,
-          newPassword: newPw,
-          confirmPassword: confirmPw,
-        }),
-      })
-
-      const data = await res.json()
-      if (!data.success) {
-        setError(data.error || 'Failed to update password')
-      } else {
-        toast.success('Password updated')
-        resetForm()
-      }
-    } catch {
-      setError('Something went wrong. Please try again.')
-    } finally {
-      setIsChanging(false)
-    }
-  }
-
-  async function handleSendReset() {
-    setError('')
-    setIsSendingReset(true)
+    setLoading(true)
     try {
       const res = await fetch('/api/auth/request-password-reset', { method: 'POST' })
       const data = await res.json()
       if (!data.success) {
         setError(data.error || 'Failed to send reset email')
       } else {
-        setResetSent(true)
-        toast.success('Reset link sent')
+        setSent(true)
       }
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
-      setIsSendingReset(false)
+      setLoading(false)
     }
   }
-
-  const busy = isChanging || isSendingReset
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
@@ -420,138 +432,36 @@ function PasswordCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {resetSent && (
+        {error && <InlineNotice variant="error">{error}</InlineNotice>}
+
+        {sent ? (
           <InlineNotice variant="success" className="items-center">
             <div className="flex flex-1 items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Reset link sent</p>
-                <p className="text-xs">Check your inbox and use the link there if you prefer a full password reset.</p>
+                <p className="text-xs">Check your inbox and click the link to set a new password.</p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setResetSent(false)}>
+              <Button variant="ghost" size="sm" onClick={() => setSent(false)}>
                 Dismiss
               </Button>
             </div>
           </InlineNotice>
-        )}
-
-        {error && <InlineNotice variant="error">{error}</InlineNotice>}
-
-        {mode === 'idle' ? (
+        ) : (
           <div className="flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
+            <div className="flex-1 space-y-1">
               <p className="text-sm font-semibold text-gray-900">Keep your login secure</p>
               <p className="text-sm text-gray-500">
-                Change your password here or send yourself a reset link if you want to restart the flow from email.
+                This flow sends a reset link to your email. Open that link to choose a new password.
               </p>
             </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={handleSendReset} disabled={busy} className="gap-2">
-                {isSendingReset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
-                Send reset link
-              </Button>
-              <Button size="sm" onClick={() => setMode('change')}>
-                Change password
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleChangePassword} className="space-y-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
-            <PasswordField
-              id="current-password"
-              label="Current password"
-              value={currentPw}
-              onChange={setCurrentPw}
-              visible={showCurrent}
-              onToggleVisibility={() => setShowCurrent((prev) => !prev)}
-            />
-
-            <PasswordField
-              id="new-password"
-              label="New password"
-              value={newPw}
-              onChange={setNewPw}
-              visible={showNew}
-              onToggleVisibility={() => setShowNew((prev) => !prev)}
-              placeholder="At least 8 characters"
-            />
-
-            <PasswordField
-              id="confirm-password"
-              label="Confirm new password"
-              value={confirmPw}
-              onChange={setConfirmPw}
-              visible={showConfirm}
-              onToggleVisibility={() => setShowConfirm((prev) => !prev)}
-              placeholder="Re-enter your new password"
-            />
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button type="button" variant="outline" className="flex-1" onClick={resetForm} disabled={busy}>
-                Cancel
-              </Button>
-              <Button type="submit" className="flex-1 gap-2" disabled={busy}>
-                {isChanging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                Save password
-              </Button>
-            </div>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleSendReset}
-              disabled={busy}
-              className="w-full"
-            >
-              {isSendingReset ? 'Sending reset link...' : 'Or send a reset link instead'}
+            <Button size="sm" onClick={handleChangePassword} disabled={loading} className="self-end gap-2 sm:self-auto">
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+              Send reset link
             </Button>
-          </form>
+          </div>
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function PasswordField({
-  id,
-  label,
-  value,
-  onChange,
-  visible,
-  onToggleVisibility,
-  placeholder,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-  visible: boolean
-  onToggleVisibility: () => void
-  placeholder?: string
-}) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="relative">
-        <Input
-          id={id}
-          type={visible ? 'text' : 'password'}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          required
-          placeholder={placeholder}
-          className="h-10 bg-white pr-10"
-        />
-        <button
-          type="button"
-          onClick={onToggleVisibility}
-          className="absolute inset-y-0 right-3 flex items-center text-gray-400 transition-colors hover:text-gray-700"
-        >
-          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
-      </div>
-    </div>
   )
 }
 
