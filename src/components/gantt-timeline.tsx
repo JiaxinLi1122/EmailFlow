@@ -10,8 +10,8 @@ import { toast } from 'sonner'
 
 const DAY_MS = 86400000
 const COL_WIDTH = 48
-const ROW_HEIGHT = 56
-const LABEL_WIDTH = 220
+const ROW_HEIGHT = 60
+const LABEL_WIDTH = 240
 const HANDLE_WIDTH = 10
 
 function toDateStr(d: Date) {
@@ -43,15 +43,15 @@ function getTaskEnd(task: any): Date | null {
 }
 
 const BAND_COLORS: Record<string, { bar: string; border: string; text: string }> = {
-  critical: { bar: 'bg-red-400', border: 'border-red-500', text: 'text-white' },
+  critical: { bar: 'bg-red-400',    border: 'border-red-500',    text: 'text-white' },
   high:     { bar: 'bg-orange-400', border: 'border-orange-500', text: 'text-white' },
   medium:   { bar: 'bg-yellow-400', border: 'border-yellow-600', text: 'text-yellow-900' },
-  low:      { bar: 'bg-gray-300', border: 'border-gray-400', text: 'text-gray-700' },
+  low:      { bar: 'bg-gray-300',   border: 'border-gray-400',   text: 'text-gray-700' },
 }
 
-interface Props { tasks: any[]; updateTask: any }
+interface Props { tasks: any[]; updateTask: any; sortBy?: string }
 
-export function GanttTimeline({ tasks, updateTask }: Props) {
+export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props) {
   const today = useMemo(() => startOfDay(new Date()), [])
   const [rangeStart, setRangeStart] = useState(() => addDays(today, -3))
   const totalDays = 21
@@ -62,6 +62,27 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
     return arr
   }, [rangeStart, totalDays])
 
+  // Sort tasks by due date ascending (no date → bottom)
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      if (sortBy === 'deadline') {
+        const aEnd = getTaskEnd(a)
+        const bEnd = getTaskEnd(b)
+        if (!aEnd && !bEnd) return a.id < b.id ? -1 : 1
+        if (!aEnd) return 1
+        if (!bEnd) return -1
+        const dateDiff = aEnd.getTime() - bEnd.getTime()
+        if (dateDiff !== 0) return dateDiff
+        return a.id < b.id ? -1 : 1  // same deadline → stable by id
+      }
+      // Default: by priority (higher score = higher priority = top)
+      // Secondary sort by id (stable cuid) so tasks with equal score never swap on refetch
+      const scoreDiff = (b.priorityScore || 0) - (a.priorityScore || 0)
+      if (scoreDiff !== 0) return scoreDiff
+      return a.id < b.id ? -1 : 1
+    })
+  }, [tasks, sortBy])
+
   // Drag state
   const dragRef = useRef<{
     taskId: string
@@ -70,9 +91,13 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
     origEnd: Date
     startX: number
   } | null>(null)
-  const [, forceRender] = useState(0)
   const deltaRef = useRef(0)
+  const [, forceRender] = useState(0)
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+
+  // Pending override: holds final position after mouseup until React Query data arrives
+  // Prevents the visual snap-back between mutation start and data refresh
+  const pendingRef = useRef<{ taskId: string; start: Date; end: Date } | null>(null)
 
   const startDrag = useCallback(
     (e: React.MouseEvent, taskId: string, mode: 'move' | 'resize-left' | 'resize-right', origStart: Date, origEnd: Date) => {
@@ -98,7 +123,8 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
     const onUp = () => {
       const drag = dragRef.current
       const delta = deltaRef.current
-      if (!drag || delta === 0) {
+
+      if (!drag) {
         dragRef.current = null
         deltaRef.current = 0
         forceRender((n) => n + 1)
@@ -108,25 +134,43 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
       let newStart = drag.origStart
       let newEnd = drag.origEnd
 
-      if (drag.mode === 'move') {
-        newStart = addDays(drag.origStart, delta)
-        newEnd = addDays(drag.origEnd, delta)
-      } else if (drag.mode === 'resize-left') {
-        newStart = addDays(drag.origStart, delta)
-        if (newStart >= newEnd) newStart = addDays(newEnd, -1)
-      } else if (drag.mode === 'resize-right') {
-        newEnd = addDays(drag.origEnd, delta)
-        if (newEnd <= newStart) newEnd = addDays(newStart, 1)
-      }
+      if (delta !== 0) {
+        if (drag.mode === 'move') {
+          newStart = addDays(drag.origStart, delta)
+          newEnd = addDays(drag.origEnd, delta)
+        } else if (drag.mode === 'resize-left') {
+          newStart = addDays(drag.origStart, delta)
+          if (newStart >= newEnd) newStart = addDays(newEnd, -1)
+        } else if (drag.mode === 'resize-right') {
+          newEnd = addDays(drag.origEnd, delta)
+          if (newEnd <= newStart) newEnd = addDays(newStart, 1)
+        }
 
-      updateTask.mutate(
-        { id: drag.taskId, data: { startDate: toDateStr(newStart), userSetDeadline: toDateStr(newEnd) } },
-        { onSuccess: () => toast.success('Timeline updated') }
-      )
+        // Lock the bar at the dropped position immediately so there's no snap-back
+        pendingRef.current = { taskId: drag.taskId, start: newStart, end: newEnd }
+      }
 
       dragRef.current = null
       deltaRef.current = 0
       forceRender((n) => n + 1)
+
+      if (delta !== 0) {
+        updateTask.mutate(
+          { id: drag.taskId, data: { startDate: toDateStr(newStart), userSetDeadline: toDateStr(newEnd) } },
+          {
+            onSuccess: () => {
+              // Don't clear pendingRef here — React Query cache may not be written yet.
+              // getBarStyle detects when task data catches up and auto-clears pending.
+              toast.success('Timeline updated')
+            },
+            onError: () => {
+              pendingRef.current = null
+              forceRender((n) => n + 1)
+              toast.error('Failed to update timeline')
+            },
+          }
+        )
+      }
     }
 
     window.addEventListener('mousemove', onMove)
@@ -137,28 +181,55 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
     }
   }, [updateTask])
 
-  // Bar position
+  // Bar position — priority: live drag > pending override > task data
   const getBarStyle = useCallback(
     (task: any) => {
-      let taskStart = getTaskStart(task)
-      let taskEnd = getTaskEnd(task)
-      if (!taskStart || !taskEnd) return null
-      if (taskEnd <= taskStart) taskEnd = addDays(taskStart, 1)
+      let taskStart: Date | null
+      let taskEnd: Date | null
 
       const drag = dragRef.current
       const delta = deltaRef.current
+
       if (drag && drag.taskId === task.id && delta !== 0) {
+        // Live drag in progress
         if (drag.mode === 'move') {
-          taskStart = addDays(taskStart, delta)
-          taskEnd = addDays(taskEnd, delta)
+          taskStart = addDays(drag.origStart, delta)
+          taskEnd = addDays(drag.origEnd, delta)
         } else if (drag.mode === 'resize-left') {
-          taskStart = addDays(taskStart, delta)
+          taskStart = addDays(drag.origStart, delta)
+          taskEnd = drag.origEnd
           if (taskStart >= taskEnd) taskStart = addDays(taskEnd, -1)
-        } else if (drag.mode === 'resize-right') {
-          taskEnd = addDays(taskEnd, delta)
+        } else {
+          taskStart = drag.origStart
+          taskEnd = addDays(drag.origEnd, delta)
           if (taskEnd <= taskStart) taskEnd = addDays(taskStart, 1)
         }
+      } else if (pendingRef.current?.taskId === task.id && pendingRef.current) {
+        const pending = pendingRef.current
+        const liveEnd = getTaskEnd(task)
+        const liveStart = getTaskStart(task)
+        // If task data has caught up to the pending position, clear and use real data
+        if (
+          liveEnd && liveStart &&
+          toDateStr(liveEnd) === toDateStr(pending.end) &&
+          toDateStr(liveStart) === toDateStr(pending.start)
+        ) {
+          pendingRef.current = null
+          taskStart = liveStart
+          taskEnd = liveEnd
+        } else {
+          // Still waiting — hold bar at dropped position to avoid snap
+          taskStart = pending.start
+          taskEnd = pending.end
+        }
+      } else {
+        // Normal: read from task data
+        taskStart = getTaskStart(task)
+        taskEnd = getTaskEnd(task)
       }
+
+      if (!taskStart || !taskEnd) return null
+      if (taskEnd <= taskStart) taskEnd = addDays(taskStart, 1)
 
       const left = diffDays(taskStart, rangeStart) * COL_WIDTH
       const width = Math.max(diffDays(taskEnd, taskStart) + 1, 1) * COL_WIDTH
@@ -169,8 +240,6 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
 
   const todayOffset = diffDays(today, rangeStart) * COL_WIDTH
   const gridWidth = totalDays * COL_WIDTH
-
-  // Date range display
   const rangeEnd = addDays(rangeStart, totalDays - 1)
   const rangeLabel = `${formatShort(rangeStart)} — ${formatShort(rangeEnd)}, ${rangeEnd.getFullYear()}`
 
@@ -221,7 +290,7 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
             </div>
 
             {/* Task rows */}
-            {tasks.map((task: any) => {
+            {sortedTasks.map((task: any) => {
               const band = getPriorityBand(task.priorityScore || 0)
               const colors = BAND_COLORS[band] || BAND_COLORS.low
               const barStyle = getBarStyle(task)
@@ -236,18 +305,29 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
                   className={`flex border-b transition-colors ${isDragging ? 'bg-blue-50/50' : 'hover:bg-gray-50/50'}`}
                   style={{ height: ROW_HEIGHT }}
                 >
-                  {/* Label — with z-index to stay above bars */}
+                  {/* Label — two lines: title + due date */}
                   <div
                     style={{ width: LABEL_WIDTH }}
                     className="shrink-0 border-r flex items-center px-3 gap-2 bg-white z-20 relative"
                   >
                     <div className={`h-2.5 w-2.5 shrink-0 rounded-full ${colors.bar}`} />
-                    <Link href={`/tasks/${task.id}`} className="truncate text-xs font-medium text-gray-800 hover:text-blue-600">
-                      {task.title}
-                    </Link>
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`/dashboard/tasks/${task.id}`}
+                        className="block text-xs font-medium text-gray-800 hover:text-blue-600 leading-tight line-clamp-2"
+                        title={task.title}
+                      >
+                        {task.title}
+                      </Link>
+                      {origEnd && (
+                        <span className="mt-0.5 block text-[9px] text-gray-400">
+                          Due {formatShort(origEnd)}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Grid + bar — clipped so bars don't overflow into label area */}
+                  {/* Grid + bar */}
                   <div className="relative flex overflow-hidden" style={{ width: gridWidth }}>
                     {/* Grid columns */}
                     {days.map((day) => (
@@ -304,7 +384,7 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
                           <div className="absolute right-1 top-1/2 -translate-y-1/2 h-3 w-0.5 rounded bg-white/60" />
                         </div>
 
-                        {/* Hover tooltip — right side */}
+                        {/* Hover tooltip */}
                         {isHovered && !isDragging && (
                           <div
                             className="pointer-events-none absolute z-30 whitespace-nowrap rounded bg-gray-900 px-2.5 py-1.5 text-[10px] font-medium text-white shadow-lg"
@@ -333,7 +413,7 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
         </div>
 
         <div className="mt-3 flex items-center gap-4 text-[10px] text-gray-400">
-          <span>Drag bar to move. Drag edges to resize. Hover for details.</span>
+          <span>Drag bar to move · Drag edges to resize · Hover for details · Sorted by due date</span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-6 rounded bg-red-400" /> Critical
             <span className="inline-block h-2.5 w-6 rounded bg-orange-400" /> High

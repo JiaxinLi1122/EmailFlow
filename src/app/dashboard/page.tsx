@@ -8,8 +8,10 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
+import { useAuth } from '@/lib/use-auth'
 
 export default function DashboardPage() {
+  const { user } = useAuth()
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
@@ -75,9 +77,39 @@ export default function DashboardPage() {
 
   return (
     <div className="animate-in fade-in space-y-6 duration-200">
+      {/* Need Attention banner — only shown when there are unlinked action emails */}
+      {attentionEmails.length > 0 && (
+        <Link href="/dashboard/emails" className="block">
+          <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-gradient-to-r from-red-50 to-orange-50 px-4 py-3 shadow-sm hover:shadow-md transition-all">
+            <div className="relative shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-100">
+                <AlertTriangle className="h-4.5 w-4.5 text-red-600" />
+              </div>
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                {attentionEmails.length}
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-red-800">
+                {attentionEmails.length} email{attentionEmails.length > 1 ? 's' : ''} need your attention
+              </p>
+              <p className="truncate text-xs text-red-600">
+                {attentionEmails[0]?.subject}
+                {attentionEmails.length > 1 ? ` and ${attentionEmails.length - 1} more…` : ''}
+              </p>
+            </div>
+            <span className="shrink-0 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors">
+              View
+            </span>
+          </div>
+        </Link>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Hi, {user?.name?.split(' ')[0] || 'there'} 👋
+          </h1>
           <p className="text-sm text-gray-500">Your email-to-task command center</p>
         </div>
 
@@ -378,13 +410,13 @@ function BarRow({ label, value, max, color }: { label: string; value: number; ma
 function StatCard({ title, value, icon, detail }: { title: string; value: string | number; icon: React.ReactNode; detail: string }) {
   return (
     <Card>
-      <CardContent className="pt-6">
+      <CardContent className="pt-4 pb-4">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-gray-500">{title}</p>
           {icon}
         </div>
-        <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
-        <p className="mt-1 text-xs text-gray-400">{detail}</p>
+        <p className="mt-1.5 text-2xl font-bold text-gray-900">{value}</p>
+        <p className="mt-0.5 text-xs text-gray-400">{detail}</p>
       </CardContent>
     </Card>
   )

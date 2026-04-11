@@ -13,10 +13,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  Check, X, Eye, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
-  Mail, Clock, ArrowUpRight, ThumbsUp, Plus,
+  Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
+  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2,
 } from 'lucide-react'
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
@@ -168,9 +168,7 @@ export default function TasksPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="priority">By Priority</SelectItem>
-            <SelectItem value="date">By Date</SelectItem>
             <SelectItem value="deadline">By Deadline</SelectItem>
-            <SelectItem value="title">By Name (A-Z)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -191,7 +189,7 @@ export default function TasksPage() {
       ) : viewMode === 'list' ? (
         <TaskListView tasks={tasks} updateTask={updateTask} />
       ) : viewMode === 'timeline' ? (
-        <GanttTimeline tasks={tasks} updateTask={updateTask} />
+        <GanttTimeline tasks={tasks} updateTask={updateTask} sortBy={sortBy} />
       ) : (
         <TaskCalendarView tasks={tasks} updateTask={updateTask} />
       )}
@@ -339,9 +337,22 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
   const isPending = task.status === 'pending'
   const isDone = task.status === 'completed' || task.status === 'dismissed'
 
+  const handleComplete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const prevStatus = task.status
+    updateTask.mutate({ id: task.id, data: { status: 'completed' } })
+    toast.success('Task completed', {
+      action: {
+        label: 'Undo',
+        onClick: () => updateTask.mutate({ id: task.id, data: { status: prevStatus } }),
+      },
+    })
+  }
+
   return (
     <div
-      className={`group flex items-center gap-3 rounded-lg border px-4 transition-all ${
+      className={`group flex items-center gap-3 rounded-lg border px-3 transition-all ${
         isPending
           ? 'border-purple-200 bg-purple-50/30 hover:border-purple-300 hover:shadow-md py-3.5'
           : isDone
@@ -349,6 +360,20 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
           : 'bg-white hover:border-gray-300 hover:shadow-md py-3.5'
       }`}
     >
+      {/* Quick-complete checkbox */}
+      <button
+        onClick={handleComplete}
+        disabled={isDone}
+        title={isDone ? 'Already done' : 'Mark complete'}
+        className="shrink-0 p-1 rounded-full transition-colors hover:bg-green-50 disabled:cursor-default disabled:opacity-40"
+      >
+        {isDone ? (
+          <CheckCircle2 className="h-5 w-5 text-green-400" />
+        ) : (
+          <Circle className="h-5 w-5 text-gray-300 group-hover:text-green-400 transition-colors" />
+        )}
+      </button>
+
       {/* Priority indicator */}
       <div className={`h-9 w-1 shrink-0 rounded-full ${
         band === 'critical' ? 'bg-red-500' : band === 'high' ? 'bg-orange-400' : band === 'medium' ? 'bg-yellow-400' : 'bg-gray-300'
@@ -400,7 +425,7 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
           <>
             {/* Pending: Confirm or Dismiss */}
             <button
-              className="flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+              className="flex items-center justify-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors min-w-[4.5rem]"
               onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'confirmed' } }); toast.success('Task confirmed') }}
             >
               <ThumbsUp className="h-3.5 w-3.5" />
@@ -416,32 +441,31 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
           </>
         ) : (
           <>
-            {/* Confirmed: Complete or Dismiss */}
+            {/* Confirmed: Done, Dismiss, Open */}
             {task.status === 'confirmed' && (
               <button
-                className="rounded-md p-1.5 text-green-600 hover:bg-green-50 transition-colors"
-                title="Complete"
-                onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'completed' } }); toast.success('Task completed') }}
+                className="flex items-center justify-center gap-1 rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors min-w-[4.5rem]"
+                onClick={() => {
+                  const prevStatus = task.status
+                  updateTask.mutate({ id: task.id, data: { status: 'completed' } })
+                  toast.success('Task completed', {
+                    action: { label: 'Undo', onClick: () => updateTask.mutate({ id: task.id, data: { status: prevStatus } }) },
+                  })
+                }}
               >
-                <Check className="h-4 w-4" />
+                <Check className="h-3.5 w-3.5" />
+                Done
               </button>
             )}
             {task.status !== 'dismissed' && task.status !== 'completed' && (
               <button
-                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                title="Dismiss"
+                className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
                 onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'dismissed' } }); toast('Task dismissed') }}
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5" />
+                Dismiss
               </button>
             )}
-            <Link
-              href={`/dashboard/tasks/${task.id}`}
-              className="rounded-md p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
-              title="Open"
-            >
-              <ArrowUpRight className="h-4 w-4" />
-            </Link>
           </>
         )}
       </div>

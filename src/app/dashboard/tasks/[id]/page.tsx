@@ -409,12 +409,14 @@ export default function TaskDetailPage() {
 
   return (
     <div className="animate-in fade-in duration-200">
+      {/* Back button — full width, sticks to the left edge */}
+      <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 hover:text-gray-900 mb-4 -ml-1">
+        <ArrowLeft className="h-4 w-4" />
+        Back to tasks
+      </Button>
+
       {/* Two-column layout */}
       <div className="mx-auto max-w-6xl space-y-5">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 hover:text-gray-900 -ml-2">
-          <ArrowLeft className="h-4 w-4" />
-          Back to tasks
-        </Button>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Task content */}
         <div className="lg:col-span-2 space-y-4">
@@ -981,8 +983,19 @@ export default function TaskDetailPage() {
                               onChange={(e) => updateItemText(item.id, e.target.value)}
                               onBlur={() => setEditingItemId(null)}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') setEditingItemId(null)
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  setEditingItemId(null)
+                                }
                                 if (e.key === 'Escape') setEditingItemId(null)
+                                if (e.key === 'Tab') {
+                                  e.preventDefault()
+                                  if (e.shiftKey) {
+                                    outdentItem(item.id)
+                                  } else {
+                                    indentItem(item.id)
+                                  }
+                                }
                               }}
                               className="w-full text-sm bg-blue-50 border border-blue-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
