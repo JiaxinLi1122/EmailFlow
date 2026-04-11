@@ -1,7 +1,6 @@
 'use client'
 
 import { useAuth } from '@/lib/use-auth'
-import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,20 +42,16 @@ export function Header() {
     <header className="flex h-14 items-center justify-between border-b bg-white px-6">
       <div />
       <div className="flex items-center gap-3">
-        <Button
-          variant="outline"
-          size="sm"
+        <button
           onClick={() => syncMutation.mutate()}
           disabled={syncMutation.isPending}
+          title={syncMutation.isPending ? 'Syncing…' : 'Sync emails'}
+          className={cn(
+            'rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors disabled:opacity-40',
+          )}
         >
-          <RefreshCw
-            className={cn(
-              'mr-2 h-3.5 w-3.5',
-              syncMutation.isPending && 'animate-spin'
-            )}
-          />
-          {syncMutation.isPending ? 'Syncing...' : 'Sync'}
-        </Button>
+          <RefreshCw className={cn('h-4 w-4', syncMutation.isPending && 'animate-spin')} />
+        </button>
 
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100">

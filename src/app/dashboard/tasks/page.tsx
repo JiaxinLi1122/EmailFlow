@@ -5,16 +5,10 @@ import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog'
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
-  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2,
+  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, ChevronDown, FolderOpen,
 } from 'lucide-react'
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -50,6 +44,21 @@ export default function TasksPage() {
     queryFn: () =>
       fetch(`/api/tasks?status=${apiStatus}&sort=${sortBy}&limit=50`).then((r) => r.json()),
   })
+
+  // Fetch matters for project grouping
+  const { data: mattersRes } = useQuery({
+    queryKey: ['matters'],
+    queryFn: () => fetch('/api/matters').then((r) => r.json()),
+  })
+  const matters: any[] = mattersRes?.data || []
+
+  const handleModalOpenChange = (open: boolean) => {
+    setShowCreateModal(open)
+    if (!open) {
+      setTaskTitle('')
+      setTaskSummary('')
+    }
+  }
 
   const handleCreateTask = async () => {
     if (!taskTitle.trim()) {
@@ -144,17 +153,17 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Filter bar — pill toggles + sort */}
+      {/* Filter bar */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
+        <div className="flex rounded-lg border bg-white p-0.5">
           {STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setStatusFilter(opt.value)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 statusFilter === opt.value
                   ? 'bg-gray-900 text-white shadow-sm'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               {opt.label}
@@ -162,15 +171,21 @@ export default function TasksPage() {
           ))}
         </div>
 
-        <Select value={sortBy} onValueChange={(v) => v && setSortBy(v)}>
-          <SelectTrigger className="w-[140px] h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="priority">By Priority</SelectItem>
-            <SelectItem value="deadline">By Deadline</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex rounded-lg border bg-white p-0.5">
+          {[{ value: 'priority', label: 'Priority' }, { value: 'deadline', label: 'Deadline' }].map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setSortBy(opt.value)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                sortBy === opt.value
+                  ? 'bg-gray-900 text-white shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
@@ -187,7 +202,7 @@ export default function TasksPage() {
           </CardContent>
         </Card>
       ) : viewMode === 'list' ? (
-        <TaskListView tasks={tasks} updateTask={updateTask} />
+        <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
       ) : viewMode === 'timeline' ? (
         <GanttTimeline tasks={tasks} updateTask={updateTask} sortBy={sortBy} />
       ) : (
@@ -195,138 +210,250 @@ export default function TasksPage() {
       )}
 
       {/* Create Task Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md">
-            <CardContent className="pt-6 space-y-4">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 mb-4">Create New Task</h2>
-              </div>
+      <Dialog open={showCreateModal} onOpenChange={handleModalOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Task</DialogTitle>
+          </DialogHeader>
 
-              {/* Title */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
-                <input
-                  type="text"
-                  value={taskTitle}
-                  onChange={(e) => setTaskTitle(e.target.value)}
-                  placeholder="Enter task title"
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  autoFocus
-                />
-              </div>
+          <div className="space-y-4 mt-1">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
+              <input
+                type="text"
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                placeholder="Enter task title"
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleCreateTask() }}
+              />
+            </div>
 
-              {/* Summary */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
-                <textarea
-                  value={taskSummary}
-                  onChange={(e) => setTaskSummary(e.target.value)}
-                  placeholder="Enter task summary (optional)"
-                  rows={3}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
+              <textarea
+                value={taskSummary}
+                onChange={(e) => setTaskSummary(e.target.value)}
+                placeholder="Brief description (optional)"
+                rows={3}
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 resize-none"
+              />
+            </div>
+          </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateTask}
-                  disabled={creatingTask || !taskTitle.trim()}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
-                >
-                  {creatingTask ? 'Creating...' : 'Create Task'}
-                </button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex gap-3 mt-2">
+            <DialogClose
+              render={
+                <button className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors" />
+              }
+            >
+              Cancel
+            </DialogClose>
+            <button
+              onClick={handleCreateTask}
+              disabled={creatingTask || !taskTitle.trim()}
+              className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {creatingTask ? 'Creating…' : 'Create Task'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ========== LIST VIEW — matter-grouped ========== */
+function TaskListView({ tasks, updateTask, matters }: { tasks: any[]; updateTask: any; matters: any[] }) {
+  // Build taskId → matter map
+  const taskToMatter = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const matter of matters) {
+      for (const taskId of matter.taskIds) {
+        map.set(taskId, matter)
+      }
+    }
+    return map
+  }, [matters])
+
+  // Group tasks by matter; unmatched → ungrouped
+  const { matterGroups, ungrouped } = useMemo(() => {
+    const grouped = new Map<string, { matter: any; tasks: any[] }>()
+    const ungrouped: any[] = []
+    for (const task of tasks) {
+      const matter = taskToMatter.get(task.id)
+      if (matter) {
+        if (!grouped.has(matter.id)) grouped.set(matter.id, { matter, tasks: [] })
+        grouped.get(matter.id)!.tasks.push(task)
+      } else {
+        ungrouped.push(task)
+      }
+    }
+    // Sort groups by most recent activity
+    const groups = Array.from(grouped.values()).sort((a, b) => {
+      const at = a.matter.lastMessageAt ? new Date(a.matter.lastMessageAt).getTime() : 0
+      const bt = b.matter.lastMessageAt ? new Date(b.matter.lastMessageAt).getTime() : 0
+      return bt - at
+    })
+    return { matterGroups: groups, ungrouped }
+  }, [tasks, taskToMatter])
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  if (tasks.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <p className="text-gray-400">No tasks found with the selected filters.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {matterGroups.map(({ matter, tasks: mTasks }) => (
+        <MatterSection
+          key={matter.id}
+          matter={matter}
+          tasks={mTasks}
+          updateTask={updateTask}
+          collapsed={collapsed.has(matter.id)}
+          onToggle={() => toggle(matter.id)}
+        />
+      ))}
+      {ungrouped.length > 0 && (
+        <MatterSection
+          matter={null}
+          tasks={ungrouped}
+          updateTask={updateTask}
+          collapsed={collapsed.has('__ungrouped__')}
+          onToggle={() => toggle('__ungrouped__')}
+        />
+      )}
+    </div>
+  )
+}
+
+const TOPIC_LABELS: Record<string, string> = {
+  meeting: 'Meeting', invoice: 'Invoice', project_update: 'Project',
+  support: 'Support', application: 'Application', approval: 'Approval',
+  deadline: 'Deadline', other: 'Other',
+}
+const STATUS_COLORS: Record<string, string> = {
+  open: 'bg-blue-100 text-blue-700',
+  pending: 'bg-yellow-100 text-yellow-700',
+  waiting_reply: 'bg-orange-100 text-orange-700',
+  completed: 'bg-green-100 text-green-700',
+}
+
+function MatterSection({
+  matter, tasks, updateTask, collapsed, onToggle,
+}: {
+  matter: any | null; tasks: any[]; updateTask: any; collapsed: boolean; onToggle: () => void
+}) {
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden shadow-sm">
+      {/* Section header */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+      >
+        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}`} />
+        <FolderOpen className={`h-4 w-4 shrink-0 ${matter ? 'text-blue-400' : 'text-gray-300'}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm text-gray-900">
+              {matter ? matter.title : 'Uncategorized'}
+            </span>
+            {matter && (
+              <>
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[matter.status] || 'bg-gray-100 text-gray-500'}`}>
+                  {matter.status.replace('_', ' ')}
+                </span>
+                <span className="text-[10px] text-gray-400">
+                  {TOPIC_LABELS[matter.topic] || matter.topic}
+                </span>
+              </>
+            )}
+          </div>
+          {matter?.summary && (
+            <p className="text-xs text-gray-400 truncate mt-0.5">{matter.summary}</p>
+          )}
+        </div>
+        <span className="shrink-0 text-xs text-gray-400 ml-2">
+          {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+        </span>
+      </button>
+
+      {/* Task rows */}
+      {!collapsed && (
+        <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-gray-50/40">
+          {tasks.map((task: any) => (
+            <TaskRow key={task.id} task={task} updateTask={updateTask} />
+          ))}
+          {matter?.nextAction && (
+            <p className="px-2 pt-1 text-[11px] text-gray-400 italic">
+              Next action: {matter.nextAction}
+            </p>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-/* ========== LIST VIEW ========== */
-function TaskListView({ tasks, updateTask }: { tasks: any[]; updateTask: any }) {
+/* ========== LIST VIEW (flat, kept for rollback) ==========
+function TaskListViewFlat({ tasks, updateTask }: { tasks: any[]; updateTask: any }) {
   const pendingTasks = tasks.filter((t: any) => t.status === 'pending')
   const activeTasks = tasks.filter((t: any) => t.status === 'confirmed')
   const completedTasks = tasks.filter((t: any) => t.status === 'completed')
   const dismissedTasks = tasks.filter((t: any) => t.status === 'dismissed')
-
   return (
     <div className="space-y-4">
-      {/* Pending tasks — need user review */}
       {pendingTasks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600">
-              Needs Review ({pendingTasks.length})
-            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600">Needs Review ({pendingTasks.length})</span>
           </div>
-          {pendingTasks.map((task: any) => (
-            <TaskRow key={task.id} task={task} updateTask={updateTask} />
-          ))}
+          {pendingTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
         </div>
       )}
-
-      {/* Active (confirmed) tasks */}
       {activeTasks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">
-              Active ({activeTasks.length})
-            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">Active ({activeTasks.length})</span>
           </div>
-          {activeTasks.map((task: any) => (
-            <TaskRow key={task.id} task={task} updateTask={updateTask} />
-          ))}
+          {activeTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
         </div>
       )}
-
-      {/* Completed */}
       {completedTasks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-green-600">
-              Completed ({completedTasks.length})
-            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-green-600">Completed ({completedTasks.length})</span>
           </div>
-          {completedTasks.map((task: any) => (
-            <TaskRow key={task.id} task={task} updateTask={updateTask} />
-          ))}
+          {completedTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
         </div>
       )}
-
-      {/* Dismissed — lowest priority, at the very bottom */}
       {dismissedTasks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-              Dismissed ({dismissedTasks.length})
-            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Dismissed ({dismissedTasks.length})</span>
           </div>
-          {dismissedTasks.map((task: any) => (
-            <TaskRow key={task.id} task={task} updateTask={updateTask} />
-          ))}
+          {dismissedTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
         </div>
-      )}
-
-      {tasks.length === 0 && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-gray-400">No tasks found with the selected filters.</p>
-          </CardContent>
-        </Card>
       )}
     </div>
   )
 }
+========== END FLAT VIEW ========== */
 
 /* ========== TASK ROW ========== */
 function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {

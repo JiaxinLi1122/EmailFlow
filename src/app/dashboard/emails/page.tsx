@@ -4,15 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Paperclip, Mail, CheckSquare, AlertTriangle, Trash2, Eye,
-  Search, SlidersHorizontal, LinkIcon, CalendarIcon, X,
+  Search, CalendarIcon, X, ChevronDown, FolderOpen,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
@@ -58,13 +51,17 @@ export default function EmailsPage() {
         setSelectingStep('to')
       } else {
         setDateRange({ from: dateRange.from, to: day })
-        // stay open — user clicks Done
+        // Auto-close once both dates are selected
+        setCalendarOpen(false)
+        setSelectingStep('from')
       }
     }
   }
 
   const handleCalendarOpenChange = (open: boolean) => {
     setCalendarOpen(open)
+    // Always start in 'from' mode when opening
+    if (open) setSelectingStep('from')
   }
 
   const { data: res, isLoading } = useQuery({
@@ -72,6 +69,12 @@ export default function EmailsPage() {
     queryFn: () =>
       fetch(`/api/emails?page=${page}&limit=50`).then((r) => r.json()),
   })
+
+  const { data: mattersRes } = useQuery({
+    queryKey: ['matters'],
+    queryFn: () => fetch('/api/matters').then((r) => r.json()),
+  })
+  const matters: any[] = mattersRes?.data || []
 
   const emails: any[] = res?.data || []
   const meta = res?.meta
@@ -131,14 +134,8 @@ export default function EmailsPage() {
     return result
   }, [emails, tab, classification, accountFilter, searchQuery, dateRange])
 
-  // Split actionable into needs-attention vs has-tasks
-  const { needsAttention, hasTaskEmails } = useMemo(() => {
-    if (tab !== 'actionable') return { needsAttention: [], hasTaskEmails: [] }
-    return {
-      needsAttention: filtered.filter((e: any) => !(e.taskLinks?.length > 0)),
-      hasTaskEmails: filtered.filter((e: any) => e.taskLinks?.length > 0),
-    }
-  }, [filtered, tab])
+  // (kept for rollback — no longer used directly in render)
+  // const { needsAttention, hasTaskEmails } = useMemo(() => { ... }, [filtered, tab])
 
   // Counts for tab badges
   const actionableCount = emails.filter((e: any) =>
@@ -205,8 +202,6 @@ export default function EmailsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <SlidersHorizontal className="h-4 w-4 text-gray-400" />
-
           {/* Date range picker */}
           <div className="inline-flex items-center gap-1">
           <Popover open={calendarOpen} onOpenChange={handleCalendarOpenChange}>
@@ -230,38 +225,37 @@ export default function EmailsPage() {
               )}
             </PopoverTrigger>
             <PopoverContent align="start" className="w-auto p-0">
-              <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              {/* Header: from → to range display */}
+              <div className="px-4 pt-3 pb-2 flex items-center justify-between border-b">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => setSelectingStep('from')}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer ${
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                       selectingStep === 'from'
-                        ? 'bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300'
-                        : dateRange?.from ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
                   >
-                    <span className="text-[10px] text-gray-400 uppercase">From</span>
-                    {dateRange?.from ? format(dateRange.from, 'MMM d') : '—'}
+                    {dateRange?.from ? format(dateRange.from, 'MMM d, yyyy') : 'Start date'}
                   </button>
-                  <span className="text-gray-300">→</span>
+                  <span className="text-gray-300 text-sm">→</span>
                   <button
                     onClick={() => setSelectingStep('to')}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer ${
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                       selectingStep === 'to'
-                        ? 'bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300'
-                        : dateRange?.to ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                        ? 'bg-blue-600 text-white'
+                        : dateRange?.to ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-gray-50 text-gray-400'
                     }`}
                   >
-                    <span className="text-[10px] text-gray-400 uppercase">To</span>
-                    {dateRange?.to ? format(dateRange.to, 'MMM d') : '—'}
+                    {dateRange?.to ? format(dateRange.to, 'MMM d, yyyy') : 'End date'}
                   </button>
                 </div>
                 {dateRange?.from && (
                   <button
                     onClick={() => { setDateRange(undefined); setSelectingStep('from') }}
-                    className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                    className="text-xs text-gray-400 hover:text-red-500 transition-colors ml-3"
                   >
-                    Reset
+                    Clear
                   </button>
                 )}
               </div>
@@ -286,24 +280,18 @@ export default function EmailsPage() {
                 startMonth={new Date(2024, 0)}
                 endMonth={new Date()}
               />
-              {dateRange?.from && (
-                <div className="border-t px-3 py-2 flex items-center justify-between">
+              {/* Footer: only shown when from is selected but to is not yet */}
+              {dateRange?.from && !dateRange?.to && (
+                <div className="border-t px-4 py-2 flex items-center justify-between bg-gray-50/60">
                   <p className="text-xs text-gray-500">
-                    {dateRange.to && dateRange.to.getTime() !== dateRange.from.getTime() ? (
-                      <span className="text-blue-600 font-medium">
-                        {differenceInDays(dateRange.to, dateRange.from) + 1} days selected
-                      </span>
-                    ) : (
-                      <span className="text-blue-600 font-medium">
-                        {format(dateRange.from, 'EEEE, MMM d')}
-                      </span>
-                    )}
+                    <span className="font-medium text-gray-700">{format(dateRange.from, 'MMM d')}</span>
+                    {' '}— now select an end date
                   </p>
                   <button
                     onClick={() => setCalendarOpen(false)}
-                    className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
                   >
-                    Done
+                    Cancel
                   </button>
                 </div>
               )}
@@ -321,31 +309,50 @@ export default function EmailsPage() {
           </div>
 
           {/* Classification filter */}
-          <Select value={classification} onValueChange={(v) => { if (v) setClassification(v) }}>
-            <SelectTrigger className="w-[130px] h-9 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="action">Action</SelectItem>
-              <SelectItem value="awareness">Awareness</SelectItem>
-              <SelectItem value="ignore">Ignored</SelectItem>
-              <SelectItem value="uncertain">Uncertain</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex rounded-lg border bg-white p-0.5">
+            {[
+              { value: 'all', label: 'All' },
+              { value: 'action', label: 'Action' },
+              { value: 'awareness', label: 'Awareness' },
+              { value: 'ignore', label: 'Ignored' },
+              { value: 'uncertain', label: 'Uncertain' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setClassification(opt.value)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  classification === opt.value
+                    ? 'bg-gray-900 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
-          {accounts.length > 0 && (
-            <Select value={accountFilter} onValueChange={(v) => { if (v) setAccountFilter(v) }}>
-              <SelectTrigger className="w-[200px] h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Accounts ({accounts.length})</SelectItem>
-                {accounts.map((acc) => (
-                  <SelectItem key={acc} value={acc}>{acc}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {accounts.length > 1 && (
+            <div className="flex rounded-lg border bg-white p-0.5">
+              <button
+                onClick={() => setAccountFilter('all')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  accountFilter === 'all' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                All
+              </button>
+              {accounts.map((acc) => (
+                <button
+                  key={acc}
+                  onClick={() => setAccountFilter(acc)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    accountFilter === acc ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  {acc.split('@')[1] || acc}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -366,12 +373,8 @@ export default function EmailsPage() {
             </p>
           </CardContent>
         </Card>
-      ) : tab === 'actionable' ? (
-        <ActionableView needsAttention={needsAttention} hasTaskEmails={hasTaskEmails} />
-      ) : tab === 'informational' ? (
-        <InformationalView emails={filtered} />
       ) : (
-        <FlatList emails={filtered} />
+        <EmailMatterView emails={filtered} matters={matters} />
       )}
 
       {/* Pagination */}
@@ -398,110 +401,181 @@ export default function EmailsPage() {
   )
 }
 
-/* ========== ACTIONABLE VIEW — flat list, no task grouping ========== */
-function ActionableView({ needsAttention, hasTaskEmails }: {
-  needsAttention: any[]
-  hasTaskEmails: any[]
-}) {
+/* ========== MATTER-GROUPED EMAIL VIEW ========== */
+const EMAIL_STATUS_COLORS: Record<string, string> = {
+  open: 'bg-blue-100 text-blue-700',
+  pending: 'bg-yellow-100 text-yellow-700',
+  waiting_reply: 'bg-orange-100 text-orange-700',
+  completed: 'bg-green-100 text-green-700',
+}
+const EMAIL_TOPIC_LABELS: Record<string, string> = {
+  meeting: 'Meeting', invoice: 'Invoice', project_update: 'Project',
+  support: 'Support', application: 'Application', approval: 'Approval',
+  deadline: 'Deadline', other: 'Other',
+}
+
+function EmailMatterView({ emails, matters }: { emails: any[]; matters: any[] }) {
+  // Build threadId → matter map
+  const threadToMatter = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const matter of matters) {
+      for (const tid of matter.threadIds) {
+        map.set(tid, matter)
+      }
+    }
+    return map
+  }, [matters])
+
+  // Group emails by matter
+  const { matterGroups, ungrouped } = useMemo(() => {
+    const grouped = new Map<string, { matter: any; emails: any[] }>()
+    const ungrouped: any[] = []
+    for (const email of emails) {
+      const matter = email.threadId ? threadToMatter.get(email.threadId) : null
+      if (matter) {
+        if (!grouped.has(matter.id)) grouped.set(matter.id, { matter, emails: [] })
+        grouped.get(matter.id)!.emails.push(email)
+      } else {
+        ungrouped.push(email)
+      }
+    }
+    const needsAttn = (emailList: any[]) =>
+      emailList.filter(
+        (e) => (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length > 0)
+      ).length
+
+    const groups = Array.from(grouped.values()).sort((a, b) => {
+      // Matters with attention emails come first
+      const aAttn = needsAttn(a.emails)
+      const bAttn = needsAttn(b.emails)
+      if (bAttn !== aAttn) return bAttn - aAttn
+      // Then by most recent activity
+      const at = a.matter.lastMessageAt ? new Date(a.matter.lastMessageAt).getTime() : 0
+      const bt = b.matter.lastMessageAt ? new Date(b.matter.lastMessageAt).getTime() : 0
+      return bt - at
+    })
+    return { matterGroups: groups, ungrouped }
+  }, [emails, threadToMatter])
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  if (emails.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Mail className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+          <p className="text-gray-400">No emails in this view.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const attentionCount = (emailList: any[]) =>
+    emailList.filter(
+      (e) => (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length > 0)
+    ).length
+
   return (
-    <div className="space-y-4">
-      {needsAttention.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <AlertTriangle className="h-4 w-4 text-red-500" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Needs Attention ({needsAttention.length})
-            </span>
+    <div className="space-y-3">
+      {matterGroups.map(({ matter, emails: mEmails }) => {
+        const attn = attentionCount(mEmails)
+        const isOpen = !collapsed.has(matter.id)
+        return (
+          <div key={matter.id} className={`rounded-xl border bg-white overflow-hidden shadow-sm ${attn > 0 ? 'border-red-200' : ''}`}>
+            <button
+              onClick={() => toggle(matter.id)}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+            >
+              <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${isOpen ? '' : '-rotate-90'}`} />
+              <FolderOpen className={`h-4 w-4 shrink-0 ${attn > 0 ? 'text-red-400' : 'text-blue-400'}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm text-gray-900">{matter.title}</span>
+                  {attn > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
+                      <AlertTriangle className="h-3 w-3" />
+                      {attn} need{attn === 1 ? 's' : ''} attention
+                    </span>
+                  )}
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${EMAIL_STATUS_COLORS[matter.status] || 'bg-gray-100 text-gray-500'}`}>
+                    {matter.status.replace('_', ' ')}
+                  </span>
+                  <span className="text-[10px] text-gray-400">
+                    {EMAIL_TOPIC_LABELS[matter.topic] || matter.topic}
+                  </span>
+                </div>
+                {matter.summary && (
+                  <p className="text-xs text-gray-400 truncate mt-0.5">{matter.summary}</p>
+                )}
+              </div>
+              <span className="shrink-0 text-xs text-gray-400 ml-2">
+                {mEmails.length} email{mEmails.length !== 1 ? 's' : ''}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-gray-50/40">
+                {mEmails.map((email: any) => (
+                  <EmailRow key={email.id} email={email} />
+                ))}
+              </div>
+            )}
           </div>
-          {needsAttention.map((email: any) => (
-            <EmailRow key={email.id} email={email} />
-          ))}
-        </div>
-      )}
-
-      {hasTaskEmails.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <LinkIcon className="h-4 w-4 text-blue-500" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Linked to Tasks ({hasTaskEmails.length})
-            </span>
+        )
+      })}
+      {ungrouped.length > 0 && (() => {
+        const attn = attentionCount(ungrouped)
+        const isOpen = !collapsed.has('__ungrouped__')
+        return (
+          <div className={`rounded-xl border bg-white overflow-hidden shadow-sm ${attn > 0 ? 'border-red-200' : ''}`}>
+            <button
+              onClick={() => toggle('__ungrouped__')}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+            >
+              <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${isOpen ? '' : '-rotate-90'}`} />
+              <FolderOpen className="h-4 w-4 shrink-0 text-gray-300" />
+              <span className="flex-1 font-semibold text-sm text-gray-500">Uncategorized</span>
+              {attn > 0 && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
+                  <AlertTriangle className="h-3 w-3" />
+                  {attn} need{attn === 1 ? 's' : ''} attention
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-gray-400 ml-2">
+                {ungrouped.length} email{ungrouped.length !== 1 ? 's' : ''}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-gray-50/40">
+                {ungrouped.map((email: any) => (
+                  <EmailRow key={email.id} email={email} />
+                ))}
+              </div>
+            )}
           </div>
-          {hasTaskEmails.map((email: any) => (
-            <EmailRow key={email.id} email={email} />
-          ))}
-        </div>
-      )}
-
-      {needsAttention.length === 0 && hasTaskEmails.length === 0 && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <CheckSquare className="mx-auto mb-3 h-10 w-10 text-green-300" />
-            <p className="text-gray-400">All caught up! No emails need your attention.</p>
-          </CardContent>
-        </Card>
-      )}
+        )
+      })()}
     </div>
   )
 }
 
-/* ========== INFORMATIONAL VIEW ========== */
-function InformationalView({ emails }: { emails: any[] }) {
-  const awareness = emails.filter((e: any) => e.classification === 'awareness')
-  const ignored = emails.filter((e: any) => e.classification === 'ignore')
-
-  return (
-    <div className="space-y-4">
-      {awareness.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Eye className="h-4 w-4 text-blue-500" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              FYI / Awareness ({awareness.length})
-            </span>
-          </div>
-          {awareness.map((email: any) => (
-            <EmailRow key={email.id} email={email} />
-          ))}
-        </div>
-      )}
-
-      {ignored.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Trash2 className="h-4 w-4 text-gray-400" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Low Priority / Noise ({ignored.length})
-            </span>
-          </div>
-          {ignored.map((email: any) => (
-            <EmailRow key={email.id} email={email} compact />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ========== FLAT LIST ========== */
-function FlatList({ emails }: { emails: any[] }) {
-  return (
-    <div className="space-y-2">
-      {emails.map((email: any) => (
-        <EmailRow key={email.id} email={email} />
-      ))}
-    </div>
-  )
-}
 
 /* ========== EMAIL ROW — shows linked tasks as badges ========== */
 function EmailRow({ email, compact }: { email: any; compact?: boolean }) {
   const linkedTasks = email.taskLinks?.map((l: any) => l.task).filter(Boolean) || []
+  const needsAttention =
+    (email.classification === 'action' || email.classification === 'uncertain') &&
+    linkedTasks.length === 0
 
   return (
     <div className={`flex items-center gap-3 rounded-lg border bg-white px-4 transition-all hover:bg-blue-50/50 hover:border-blue-200 ${
       compact ? 'py-2 opacity-75' : 'py-3'
-    }`}>
+    } ${needsAttention ? 'border-l-2 border-l-red-400' : ''}`}>
       <Link
         href={`/dashboard/emails/${email.id}`}
         className="flex items-center gap-3 min-w-0 flex-1"

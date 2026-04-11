@@ -420,6 +420,107 @@ async function main() {
     })
   }
 
+  // ── MatterMemory + ThreadMemory (project grouping for UI) ───────────────
+  const matter1 = await prisma.matterMemory.upsert({
+    where: { id: 'matter-001' },
+    update: {
+      title: 'Q1 Financial Report Review', topic: 'deadline',
+      summary: 'Sarah Chen needs feedback on the Q1 report by Friday EOD.',
+      status: 'open',
+      nextAction: 'Review page 3 revenue projections and page 7 cost breakdown, then reply to Sarah.',
+      threadCount: 1, emailCount: 1, lastMessageAt: daysAgo(0),
+      participants: ['sarah@clientcorp.com', 'demo@emailflow.ai'],
+      keywords: ['Q1', 'report', 'review', 'board', 'Friday'],
+    },
+    create: {
+      id: 'matter-001', userId: user.id,
+      title: 'Q1 Financial Report Review', topic: 'deadline',
+      summary: 'Sarah Chen needs feedback on the Q1 report by Friday EOD.',
+      status: 'open',
+      nextAction: 'Review page 3 revenue projections and page 7 cost breakdown, then reply to Sarah.',
+      threadCount: 1, emailCount: 1, lastMessageAt: daysAgo(0),
+      participants: ['sarah@clientcorp.com', 'demo@emailflow.ai'],
+      keywords: ['Q1', 'report', 'review', 'board', 'Friday'],
+    },
+  })
+
+  const matter2 = await prisma.matterMemory.upsert({
+    where: { id: 'matter-002' },
+    update: {
+      title: 'CloudHost Infrastructure Contract', topic: 'invoice',
+      summary: 'Contract review pending and invoice #2048 due in 3 days.',
+      status: 'open',
+      nextAction: 'Review contract clauses 3 & 7 by Tuesday, then pay invoice.',
+      threadCount: 2, emailCount: 2, lastMessageAt: daysAgo(0),
+      participants: ['legal@vendor.com', 'billing@cloudhost.io', 'demo@emailflow.ai'],
+      keywords: ['CloudHost', 'contract', 'invoice', 'billing', 'clauses'],
+    },
+    create: {
+      id: 'matter-002', userId: user.id,
+      title: 'CloudHost Infrastructure Contract', topic: 'invoice',
+      summary: 'Contract review pending and invoice #2048 due in 3 days.',
+      status: 'open',
+      nextAction: 'Review contract clauses 3 & 7 by Tuesday, then pay invoice.',
+      threadCount: 2, emailCount: 2, lastMessageAt: daysAgo(0),
+      participants: ['legal@vendor.com', 'billing@cloudhost.io', 'demo@emailflow.ai'],
+      keywords: ['CloudHost', 'contract', 'invoice', 'billing', 'clauses'],
+    },
+  })
+
+  const matter3 = await prisma.matterMemory.upsert({
+    where: { id: 'matter-003' },
+    update: {
+      title: 'Partnership Exploration — Alex Wong', topic: 'meeting',
+      summary: 'Alex Wong reached out about a potential partnership, awaiting response.',
+      status: 'waiting_reply',
+      nextAction: 'Decide whether to schedule a call with Alex Wong.',
+      threadCount: 1, emailCount: 1, lastMessageAt: daysAgo(2),
+      participants: ['alex@startup.io', 'demo@emailflow.ai'],
+      keywords: ['partnership', 'call', 'collaboration'],
+    },
+    create: {
+      id: 'matter-003', userId: user.id,
+      title: 'Partnership Exploration — Alex Wong', topic: 'meeting',
+      summary: 'Alex Wong reached out about a potential partnership, awaiting response.',
+      status: 'waiting_reply',
+      nextAction: 'Decide whether to schedule a call with Alex Wong.',
+      threadCount: 1, emailCount: 1, lastMessageAt: daysAgo(2),
+      participants: ['alex@startup.io', 'demo@emailflow.ai'],
+      keywords: ['partnership', 'call', 'collaboration'],
+    },
+  })
+
+  const threads = [
+    { id: 'tmem-001', threadId: 'thread-001', matterId: matter1.id, title: 'Q1 Report Review Request', topic: 'deadline', summary: 'Sarah requests Q1 report feedback by Friday EOD.', status: 'open', nextAction: 'Review report and send feedback.', lastClassification: 'action', emailCount: 1, participants: ['sarah@clientcorp.com'], lastMessageAt: daysAgo(0) },
+    { id: 'tmem-006', threadId: 'thread-006', matterId: matter2.id, title: 'Contract Draft — Clauses 3 & 7', topic: 'approval', summary: 'Legal team sent contract for clause review by Tuesday.', status: 'open', nextAction: 'Review clauses 3 and 7 and confirm.', lastClassification: 'action', emailCount: 1, participants: ['legal@vendor.com'], lastMessageAt: daysAgo(1) },
+    { id: 'tmem-007', threadId: 'thread-007', matterId: matter2.id, title: 'Invoice #2048 Due in 3 Days', topic: 'invoice', summary: 'CloudHost invoice due soon, service interruption risk.', status: 'open', nextAction: 'Pay invoice #2048.', lastClassification: 'action', emailCount: 1, participants: ['billing@cloudhost.io'], lastMessageAt: daysAgo(0) },
+    { id: 'tmem-009', threadId: 'thread-009', matterId: matter3.id, title: 'Partnership Inquiry from Alex Wong', topic: 'meeting', summary: 'Cold outreach proposing a 30-min partnership call.', status: 'waiting_reply', nextAction: 'Evaluate and decide on a response.', lastClassification: 'uncertain', emailCount: 1, participants: ['alex@startup.io'], lastMessageAt: daysAgo(2) },
+  ]
+
+  for (const t of threads) {
+    await prisma.threadMemory.upsert({
+      where: { userId_threadId: { userId: user.id, threadId: t.threadId } },
+      update: { matterId: t.matterId, title: t.title, topic: t.topic, summary: t.summary, status: t.status, nextAction: t.nextAction, lastClassification: t.lastClassification, emailCount: t.emailCount, participants: t.participants, lastMessageAt: t.lastMessageAt },
+      create: { id: t.id, userId: user.id, threadId: t.threadId, matterId: t.matterId, title: t.title, topic: t.topic, summary: t.summary, status: t.status, nextAction: t.nextAction, lastClassification: t.lastClassification, emailCount: t.emailCount, participants: t.participants, lastMessageAt: t.lastMessageAt },
+    })
+  }
+
+  // Link primary tasks to matters
+  const q1Task = await prisma.task.findFirst({ where: { userId: user.id, title: 'Review Q1 report and send feedback' } })
+  const contractTask = await prisma.task.findFirst({ where: { userId: user.id, title: 'Review contract clauses 3 and 7' } })
+  const invoiceTask = await prisma.task.findFirst({ where: { userId: user.id, title: 'Pay CloudHost invoice #2048' } })
+  if (q1Task) {
+    await prisma.matterMemory.update({ where: { id: matter1.id }, data: { linkedPrimaryTaskId: q1Task.id } })
+    await prisma.threadMemory.updateMany({ where: { userId: user.id, threadId: 'thread-001' }, data: { linkedTaskId: q1Task.id } })
+  }
+  if (contractTask) {
+    await prisma.matterMemory.update({ where: { id: matter2.id }, data: { linkedPrimaryTaskId: contractTask.id } })
+    await prisma.threadMemory.updateMany({ where: { userId: user.id, threadId: 'thread-006' }, data: { linkedTaskId: contractTask.id } })
+  }
+  if (invoiceTask) {
+    await prisma.threadMemory.updateMany({ where: { userId: user.id, threadId: 'thread-007' }, data: { linkedTaskId: invoiceTask.id } })
+  }
+
   const standaloneTasks = [
     {
       title: 'Prepare presentation slides',
