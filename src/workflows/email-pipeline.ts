@@ -77,17 +77,10 @@ async function buildMemoryContext(
   matterMemory: MatterMemory | null
 ): Promise<string> {
   const lines: string[] = [
-    'User preferences and learned handling rules:',
     '- Prefer short actionable summaries.',
     '- Emails about deadlines, meetings, interviews, university, work, bills, payments, verification, approvals, and submissions should be treated as more important.',
     '- Promotional, newsletter, discount, sale, and generic marketing emails are usually low value unless they contain a clear required action.',
   ]
-
-  // Domain-specific rules
-  const lowerSender = sender.toLowerCase()
-  if (lowerSender.includes('anu.edu.au')) {
-    lines.push('- Emails from anu.edu.au are usually important and often action-related.')
-  }
 
   // Learned sender behavior
   const senderMemory = await prisma.senderMemory.findUnique({
@@ -181,6 +174,7 @@ async function stepUpdateThreadMemory(
     sender: string
     receivedAt: Date
     bodyPreview: string
+    bodyFull: string | null
   },
   threadId: string,
   existingMemory: ThreadMemory | null,
@@ -190,7 +184,7 @@ async function stepUpdateThreadMemory(
     subject: email.subject,
     sender: email.sender,
     date: email.receivedAt.toISOString(),
-    bodyPreview: email.bodyPreview,
+    bodyPreview: email.bodyFull ?? email.bodyPreview,
     classification,
     existingMemory: existingMemory
       ? {
@@ -431,11 +425,25 @@ export async function processEmail(
   const classification = await stepClassify(email, memoryContext)
   await updateSenderMemory(userId, email.sender, classification.category)
 
-  // ── 4. Update thread memory ────────────────────────────────
-  //    Run for every non-prefiltered email, regardless of category.
   let currentThreadMemory: ThreadMemory | null = existingThreadMemory
   let currentMatterMemory: MatterMemory | null = existingMatterMemory
+  let currentMemoryContext = memoryContext
 
+  // ── 4. Ignore: no thread memory, no matter matching ────────
+  if (classification.category === 'ignore') {
+    return {
+      emailId: email.id,
+      classification: classification.category,
+      confidence: classification.confidence,
+      taskCreated: false,
+      skippedByRule: false,
+    }
+  }
+
+  // ── 5. Update thread memory ────────────────────────────────
+  //    awareness + action both update thread memory.
+  //    Uses bodyFull when available so the summary reflects the
+  //    full content (also satisfies the needsFullAnalysis signal).
   if (threadId) {
     currentThreadMemory = await stepUpdateThreadMemory(
       userId,
@@ -445,11 +453,22 @@ export async function processEmail(
       classification.category
     )
 
-    // ── 5. Match or create matter ────────────────────────────
-    currentMatterMemory = await stepMatchOrCreateMatter(userId, currentThreadMemory, threadId)
+    if (classification.category === 'action') {
+      // Rebuild memory context with the freshly updated thread state so that
+      // extractTask and scorePriority operate on current information.
+      currentMemoryContext = await buildMemoryContext(
+        userId,
+        email.sender,
+        currentThreadMemory,
+        existingMatterMemory
+      )
+
+      // ── 6. Match or create matter (action only) ──────────
+      currentMatterMemory = await stepMatchOrCreateMatter(userId, currentThreadMemory, threadId)
+    }
   }
 
-  // ── 6. Non-action emails: done ─────────────────────────────
+  // ── 7. Non-action emails: done (awareness, uncertain) ──────
   if (classification.category !== 'action') {
     return {
       emailId: email.id,
@@ -460,7 +479,7 @@ export async function processEmail(
     }
   }
 
-  // ── 7. Task dedup — matter level (broadest check) ─────────
+  // ── 8. Task dedup — matter level (broadest check) ─────────
   //    If this matter already has a primary task, link the
   //    email as a follow-up instead of creating a duplicate.
   if (currentMatterMemory?.linkedPrimaryTaskId) {
@@ -488,7 +507,7 @@ export async function processEmail(
     }
   }
 
-  // ── 8. Task dedup — thread level (fallback for no-threadId emails) ──
+  // ── 9. Task dedup — thread level (fallback for no-threadId emails) ──
   if (currentThreadMemory?.linkedTaskId) {
     const existingTaskId = currentThreadMemory.linkedTaskId
 
@@ -514,13 +533,13 @@ export async function processEmail(
     }
   }
 
-  // ── 9. Extract task ────────────────────────────────────────
-  const extraction = await stepExtractTask(email, memoryContext, currentThreadMemory)
+  // ── 10. Extract task ───────────────────────────────────────
+  const extraction = await stepExtractTask(email, currentMemoryContext, currentThreadMemory)
 
-  // ── 10. Score priority ─────────────────────────────────────
-  const priority = await stepScorePriority(extraction, email.sender, memoryContext)
+  // ── 11. Score priority ─────────────────────────────────────
+  const priority = await stepScorePriority(extraction, email.sender, currentMemoryContext)
 
-  // ── 11. Create task ────────────────────────────────────────
+  // ── 12. Create task ────────────────────────────────────────
   const task = await taskRepo.createTask({
     userId,
     emailId: email.id,
@@ -528,7 +547,7 @@ export async function processEmail(
     priority,
   })
 
-  // ── 12. Link task to thread + matter ──────────────────────
+  // ── 13. Link task to thread + matter ──────────────────────
   if (threadId && currentThreadMemory) {
     await threadMemoryRepo.linkTask(userId, threadId, task.id)
   }
