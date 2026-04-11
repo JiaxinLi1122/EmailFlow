@@ -5,7 +5,7 @@ import { createToken, setSessionCookie } from '@/lib/auth-token'
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json()
+    const { email, password, rememberMe } = await req.json()
 
     if (!email || !password) {
       return NextResponse.json(
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       email: user.email,
     })
 
-    await setSessionCookie(token)
+    await setSessionCookie(token, !!rememberMe)
 
     return NextResponse.json({
       success: true,

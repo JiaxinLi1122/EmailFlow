@@ -5,25 +5,49 @@ import { getAuthUser } from '@/lib/api-helpers'
 import { sendPasswordResetEmail } from '@/lib/mailer'
 import { hashResetToken, getTokenTtlMs, RATE_LIMIT_SECONDS } from '@/lib/password-reset'
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    // Support two modes:
+    // 1. Authenticated (logged-in user from Settings) — no body needed
+    // 2. Unauthenticated (forgot-password from login page) — pass { email } in body
     const sessionUser = await getAuthUser()
-    if (!sessionUser) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
+
+    let user: { id: string; email: string; passwordHash: string | null } | null = null
+
+    if (sessionUser) {
+      user = await prisma.user.findUnique({ where: { id: sessionUser.id } })
+    } else {
+      // Try to find by email from body
+      let email: string | undefined
+      try {
+        const body = await req.json()
+        email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : undefined
+      } catch {
+        // no body / not JSON
+      }
+      if (!email) {
+        return NextResponse.json(
+          { success: false, error: 'Email is required' },
+          { status: 400 }
+        )
+      }
+      user = await prisma.user.findUnique({ where: { email } })
     }
 
-    const user = await prisma.user.findUnique({ where: { id: sessionUser.id } })
+    // Always return success for unauthenticated requests to prevent email enumeration
+    const genericOk = NextResponse.json({
+      success: true,
+      data: { message: 'If that email has an account, a reset link has been sent.' },
+    })
+
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+      // Don't reveal whether the email exists
+      if (!sessionUser) return genericOk
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 })
     }
 
     if (!user.passwordHash) {
+      if (!sessionUser) return genericOk
       return NextResponse.json(
         { success: false, error: 'This account uses OAuth sign-in and has no local password' },
         { status: 400 }
@@ -65,10 +89,9 @@ export async function POST() {
 
     await sendPasswordResetEmail(user.email, resetLink)
 
-    return NextResponse.json({
-      success: true,
-      data: { message: 'Password reset email sent. Check your inbox.' },
-    })
+    return sessionUser
+      ? NextResponse.json({ success: true, data: { message: 'Password reset email sent. Check your inbox.' } })
+      : genericOk
   } catch (err) {
     console.error('[api/auth/request-password-reset]', err)
     return NextResponse.json(

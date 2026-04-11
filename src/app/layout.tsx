@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 import { QueryProviders } from '@/components/providers'
 import { Toaster } from '@/components/ui/sonner'
+import { RootTransition } from '@/components/root-transition'
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] })
 const jakarta = Plus_Jakarta_Sans({ variable: '--font-jakarta', subsets: ['latin'], weight: ['500', '600', '700', '800'] })
@@ -20,7 +21,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${jakarta.variable} ${jetbrainsMono.variable} h-full`}>
       <body className="h-full bg-gray-50 antialiased">
         <QueryProviders>
-          {children}
+          <RootTransition>{children}</RootTransition>
           <Toaster />
         </QueryProviders>
       </body>

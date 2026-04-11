@@ -23,13 +23,13 @@ export function verifyToken(token: string): TokenPayload | null {
   }
 }
 
-export async function setSessionCookie(token: string) {
+export async function setSessionCookie(token: string, remember = false) {
   const cookieStore = await cookies()
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: MAX_AGE,
+    ...(remember ? { maxAge: MAX_AGE } : {}),
     path: '/',
   })
 }

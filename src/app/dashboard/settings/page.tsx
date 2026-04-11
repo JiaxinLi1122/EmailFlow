@@ -1,12 +1,13 @@
 'use client'
 
+import { useState } from 'react'
 import { useAuth } from '@/lib/use-auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { Mail, Shield, Trash2, LogOut } from 'lucide-react'
+import { Mail, Shield, Trash2, LogOut, KeyRound, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function SettingsPage() {
@@ -107,6 +108,8 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <PasswordCard />
 
       <Card>
         <CardHeader>
@@ -246,5 +249,177 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/* ========== PASSWORD CARD ========== */
+function PasswordCard() {
+  type Mode = 'idle' | 'change' | 'reset-sent'
+  const [mode, setMode] = useState<Mode>('idle')
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  function resetForm() {
+    setCurrentPw(''); setNewPw(''); setConfirmPw('')
+    setShowCurrent(false); setShowNew(false)
+    setError('')
+    setMode('idle')
+  }
+
+  async function handleChangePassword(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw, confirmPassword: confirmPw }),
+      })
+      const data = await res.json()
+      if (!data.success) {
+        setError(data.error || 'Failed to update password')
+      } else {
+        toast.success('Password updated')
+        resetForm()
+      }
+    } catch {
+      setError('Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSendReset() {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/request-password-reset', { method: 'POST' })
+      const data = await res.json()
+      if (!data.success) {
+        setError(data.error || 'Failed to send reset email')
+      } else {
+        setMode('reset-sent')
+      }
+    } catch {
+      setError('Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <KeyRound className="h-4 w-4" />
+          Password
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {mode === 'idle' && (
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">Update your login password</p>
+            <Button variant="outline" size="sm" onClick={() => setMode('change')}>
+              Change password
+            </Button>
+          </div>
+        )}
+
+        {mode === 'reset-sent' && (
+          <div className="flex items-center gap-3 rounded-lg bg-green-50 px-4 py-3">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
+            <div>
+              <p className="text-sm font-medium text-green-800">Reset link sent</p>
+              <p className="text-xs text-green-600">Check your inbox and click the link to set a new password.</p>
+            </div>
+            <button onClick={resetForm} className="ml-auto text-xs text-green-600 hover:underline">Dismiss</button>
+          </div>
+        )}
+
+        {mode === 'change' && (
+          <form onSubmit={handleChangePassword} className="space-y-3">
+            {error && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
+            )}
+
+            {/* Current password */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">Current password</label>
+              <div className="relative">
+                <input
+                  type={showCurrent ? 'text' : 'password'}
+                  value={currentPw}
+                  onChange={(e) => setCurrentPw(e.target.value)}
+                  required
+                  className="w-full rounded-lg border px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+                <button type="button" onClick={() => setShowCurrent((p) => !p)}
+                  className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-700">
+                  {showCurrent ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* New password */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">New password</label>
+              <div className="relative">
+                <input
+                  type={showNew ? 'text' : 'password'}
+                  value={newPw}
+                  onChange={(e) => setNewPw(e.target.value)}
+                  required
+                  minLength={8}
+                  placeholder="Min. 8 characters"
+                  className="w-full rounded-lg border px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+                <button type="button" onClick={() => setShowNew((p) => !p)}
+                  className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-700">
+                  {showNew ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm password */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                required
+                placeholder="Re-enter new password"
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={resetForm}
+                className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={loading}
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Save
+              </button>
+            </div>
+
+            {/* Send reset email instead */}
+            <button type="button" onClick={handleSendReset} disabled={loading}
+              className="w-full pt-1 text-center text-xs text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-50">
+              Or send a reset link to my email instead
+            </button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   )
 }
