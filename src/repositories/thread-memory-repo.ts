@@ -22,7 +22,7 @@ export type ThreadMemory = {
   lastMessageAt: Date | null
   emailCount: number
   lastClassification: string | null
-  participants: string
+  participants: string[]
   needsFullAnalysis: boolean
   confidence: number
   createdAt: Date
@@ -61,7 +61,7 @@ export async function upsert(
     select: { participants: true },
   })
 
-  const participants = mergeParticipants(existing?.participants ?? null, data.sender)
+  const participants = mergeParticipants(existing?.participants as string[] | null, data.sender)
 
   if (!existing) {
     return prisma.threadMemory.create({
@@ -133,14 +133,7 @@ export async function setMatter(
 
 // ── helpers ───────────────────────────────────────────────────
 
-function mergeParticipants(existingJson: string | null, newSender: string): string {
-  try {
-    const existing: string[] = existingJson ? JSON.parse(existingJson) : []
-    if (!existing.includes(newSender)) {
-      existing.push(newSender)
-    }
-    return JSON.stringify(existing)
-  } catch {
-    return JSON.stringify([newSender])
-  }
+function mergeParticipants(existing: string[] | null, newSender: string): string[] {
+  const arr = existing ?? []
+  return arr.includes(newSender) ? arr : [...arr, newSender]
 }

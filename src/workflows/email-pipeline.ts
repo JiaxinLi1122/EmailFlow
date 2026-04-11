@@ -240,6 +240,7 @@ async function stepMatchOrCreateMatter(
   const candidates = await matterMemoryRepo.findCandidates(userId, {
     topic: threadMemory.topic,
     participants: threadMemory.participants,
+    title: threadMemory.title,
   })
 
   let matchedMatterId: string | null = null

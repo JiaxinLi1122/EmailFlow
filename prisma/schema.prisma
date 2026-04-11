@@ -183,8 +183,8 @@ model MatterMemory {
   emailCount          Int @default(0) // total emails processed across all threads
 
   lastClassification String? // classification of most recent email
-  participants       String  @default("[]") // JSON array of unique senders seen across all threads
-  keywords           String  @default("[]") // JSON array of key terms for rule-based matching
+  participants       Json    @default("[]") // JSON array of unique senders seen across all threads
+  keywords           Json    @default("[]") // JSON array of key terms for rule-based matching
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -211,7 +211,7 @@ model ThreadMemory {
   emailCount   Int @default(0)
 
   lastClassification String? // action | awareness | ignore | uncertain
-  participants       String  @default("[]") // JSON array of unique senders seen in thread
+  participants       Json    @default("[]") // JSON array of unique senders seen in thread
 
   needsFullAnalysis Boolean @default(false) // hint: true when bodyPreview was insufficient
   confidence        Float   @default(1.0)
