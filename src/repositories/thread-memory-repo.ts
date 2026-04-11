@@ -46,9 +46,10 @@ export async function findByThread(
   userId: string,
   threadId: string
 ): Promise<ThreadMemory | null> {
-  return prisma.threadMemory.findUnique({
+  const raw = await prisma.threadMemory.findUnique({
     where: { userId_threadId: { userId, threadId } },
   })
+  return raw ? mapRow(raw) : null
 }
 
 export async function upsert(
@@ -64,7 +65,7 @@ export async function upsert(
   const participants = mergeParticipants(existing?.participants as string[] | null, data.sender)
 
   if (!existing) {
-    return prisma.threadMemory.create({
+    return mapRow(await prisma.threadMemory.create({
       data: {
         userId,
         threadId,
@@ -80,10 +81,10 @@ export async function upsert(
         emailCount: 1,
         needsFullAnalysis: data.needsFullAnalysis,
       },
-    })
+    }))
   }
 
-  return prisma.threadMemory.update({
+  return mapRow(await prisma.threadMemory.update({
     where: { userId_threadId: { userId, threadId } },
     data: {
       title: data.title,
@@ -98,7 +99,7 @@ export async function upsert(
       emailCount: { increment: 1 },
       needsFullAnalysis: data.needsFullAnalysis,
     },
-  })
+  }))
 }
 
 /**
@@ -132,6 +133,17 @@ export async function setMatter(
 }
 
 // ── helpers ───────────────────────────────────────────────────
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string')
+}
+
+// Prisma returns Json columns as JsonValue; map them to typed fields at the boundary.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRow(raw: any): ThreadMemory {
+  return { ...raw, participants: asStringArray(raw.participants) }
+}
 
 function mergeParticipants(existing: string[] | null, newSender: string): string[] {
   const arr = existing ?? []

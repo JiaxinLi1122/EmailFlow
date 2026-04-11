@@ -67,19 +67,18 @@ export async function findCandidates(
 
   const scored = recent
     .map((m) => {
-      const mParticipants = (m.participants as string[]) ?? []
-      const topicMatch = m.topic === thread.topic && thread.topic !== 'other'
-      const participantOverlap = mParticipants.some((p) => thread.participants.includes(p))
+      const matter = mapRow(m)
+      const topicMatch = matter.topic === thread.topic && thread.topic !== 'other'
+      const participantOverlap = matter.participants.some((p) => thread.participants.includes(p))
 
       // Require at least one primary signal to be a candidate
       if (!topicMatch && !participantOverlap) return null
 
       // Keywords are a weak tiebreaker among already-qualifying candidates
-      const mKeywords = (m.keywords as string[]) ?? []
-      const keywordOverlap = mKeywords.filter((k) => threadKeywords.has(k)).length
+      const keywordOverlap = matter.keywords.filter((k) => threadKeywords.has(k)).length
 
       const score = (topicMatch ? 2 : 0) + (participantOverlap ? 1 : 0) + (keywordOverlap >= 2 ? 0.5 : 0)
-      return { matter: m as MatterMemory, score }
+      return { matter, score }
     })
     .filter((x): x is { matter: MatterMemory; score: number } => x !== null)
     .sort((a, b) => b.score - a.score)
@@ -92,7 +91,8 @@ export async function findCandidates(
 // ── Reads ─────────────────────────────────────────────────────
 
 export async function findById(matterId: string): Promise<MatterMemory | null> {
-  return prisma.matterMemory.findUnique({ where: { id: matterId } })
+  const raw = await prisma.matterMemory.findUnique({ where: { id: matterId } })
+  return raw ? mapRow(raw) : null
 }
 
 // ── Writes ────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export async function createFromThread(
   userId: string,
   thread: ThreadMemory
 ): Promise<MatterMemory> {
-  return prisma.matterMemory.create({
+  return mapRow(await prisma.matterMemory.create({
     data: {
       userId,
       title: thread.title,
@@ -120,7 +120,7 @@ export async function createFromThread(
       threadCount: 1,
       emailCount: 1, // the email that triggered this creation
     },
-  })
+  }))
 }
 
 /**
@@ -138,7 +138,7 @@ export async function updateFromThread(
 
   const mergedParticipants = mergeParticipants(matter?.participants as string[] | null, thread.participants)
 
-  return prisma.matterMemory.update({
+  return mapRow(await prisma.matterMemory.update({
     where: { id: matterId },
     data: {
       summary: thread.summary,
@@ -150,7 +150,7 @@ export async function updateFromThread(
       participants: mergedParticipants,
       emailCount: { increment: 1 },
     },
-  })
+  }))
 }
 
 /**
@@ -168,7 +168,7 @@ export async function mergeThread(
 
   const mergedParticipants = mergeParticipants(matter?.participants as string[] | null, thread.participants)
 
-  return prisma.matterMemory.update({
+  return mapRow(await prisma.matterMemory.update({
     where: { id: matterId },
     data: {
       summary: thread.summary,
@@ -181,7 +181,7 @@ export async function mergeThread(
       threadCount: { increment: 1 },
       emailCount: { increment: 1 },
     },
-  })
+  }))
 }
 
 /**
@@ -195,6 +195,21 @@ export async function linkPrimaryTask(matterId: string, taskId: string): Promise
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string')
+}
+
+// Prisma returns Json columns as JsonValue; map them to typed fields at the boundary.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRow(raw: any): MatterMemory {
+  return {
+    ...raw,
+    participants: asStringArray(raw.participants),
+    keywords: asStringArray(raw.keywords),
+  }
+}
 
 function mergeParticipants(existing: string[] | null, incoming: string[]): string[] {
   return Array.from(new Set([...(existing ?? []), ...incoming]))
