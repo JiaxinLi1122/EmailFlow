@@ -2,13 +2,37 @@
 
 import { useState } from 'react'
 import { useAuth } from '@/lib/use-auth'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { Mail, Shield, Trash2, LogOut, KeyRound, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { InlineNotice } from '@/components/inline-notice'
+import { PageHeader } from '@/components/page-header'
+import {
+  Clock3,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Lock,
+  LogOut,
+  Mail,
+  RotateCcw,
+  Shield,
+  Unplug,
+} from 'lucide-react'
 import { toast } from 'sonner'
+
+type CurrentUser = {
+  email?: string | null
+  gmailEmail?: string | null
+  name?: string | null
+  syncStartDate?: string | null
+}
+
+const SYNC_PRESETS = [7, 15, 30, 90]
 
 export default function SettingsPage() {
   const { user, logout } = useAuth()
@@ -24,19 +48,34 @@ export default function SettingsPage() {
     queryFn: () => fetch('/api/auth/me').then((r) => r.json()),
   })
 
-  const s = stats?.data?.sync
-  const gmailConnected = !!s?.gmailConnected
-  const currentUser = meRes?.user || meRes?.data || null
+  const currentUser: CurrentUser | null = meRes?.user || meRes?.data || null
+  const syncData = stats?.data?.sync
+  const gmailConnected = Boolean(syncData?.gmailConnected)
   const connectedGmail = currentUser?.gmailEmail || null
 
-  const syncStartDate = currentUser?.syncStartDate
+  const syncSummary = (() => {
+    if (!currentUser?.syncStartDate) {
+      return {
+        days: 15,
+        exactPreset: 15,
+        label: 'Last 15 days',
+        helper: 'Default sync window for new accounts.',
+      }
+    }
 
-  let currentDays: number | null = null
+    const now = new Date()
+    const startDate = new Date(currentUser.syncStartDate)
+    const diffMs = Math.max(0, now.getTime() - startDate.getTime())
+    const days = Math.max(1, Math.round(diffMs / 86400000))
+    const exactPreset = SYNC_PRESETS.includes(days) ? days : null
 
-  if (syncStartDate) {
-    const diff = Date.now() - new Date(syncStartDate).getTime()
-    currentDays = Math.round(diff / (1000 * 60 * 60 * 24))
-  }
+    return {
+      days,
+      exactPreset,
+      label: exactPreset ? `Last ${exactPreset} days` : `Custom range: ${days} days`,
+      helper: `Sync starts from ${startDate.toLocaleDateString()}.`,
+    }
+  })()
 
   const disconnectMutation = useMutation({
     mutationFn: async () => {
@@ -55,6 +94,7 @@ export default function SettingsPage() {
     onSuccess: () => {
       toast.success('Gmail disconnected')
       queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Disconnect failed')
@@ -78,7 +118,7 @@ export default function SettingsPage() {
       return json
     },
     onSuccess: () => {
-      toast.success('Sync range updated')
+      toast.success('Sync window updated')
       queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
@@ -87,200 +127,255 @@ export default function SettingsPage() {
     },
   })
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+  const isBusy = disconnectMutation.isPending || syncRangeMutation.isPending
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Account</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">{user?.name}</p>
-              <p className="text-xs text-gray-500">{user?.email}</p>
+  return (
+    <div className="mx-auto max-w-3xl space-y-5">
+      <PageHeader
+        title="Settings"
+        description="Manage your account, email connections, and how the pipeline syncs your inbox."
+      />
+
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-gray-900">{user?.name || 'Your account'}</p>
+            <p className="text-sm text-gray-500">{user?.email}</p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-800">
+                Workspace account
+              </Badge>
+              {gmailConnected ? (
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Gmail connected</Badge>
+              ) : (
+                <Badge variant="outline">Gmail not connected</Badge>
+              )}
             </div>
-            <Button variant="outline" size="sm" onClick={() => logout()}>
-              <LogOut className="mr-2 h-3.5 w-3.5" />
-              Sign out
-            </Button>
           </div>
+
+          <Button variant="outline" size="sm" onClick={() => logout()} className="gap-2 self-start sm:self-auto">
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </Button>
         </CardContent>
       </Card>
 
       <PasswordCard />
 
-      <Card>
-        <CardHeader>
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Mail className="h-4 w-4" />
-            Email Connections
+            <Mail className="h-4 w-4 text-blue-700" />
+            Email Connection
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Gmail</p>
-              <p className="text-xs text-gray-500">
-                {gmailConnected
-                  ? (connectedGmail || 'Connected Gmail')
-                  : 'Not connected'}
-              </p>
-              <p className="text-xs text-gray-400">
-                {s?.lastSyncAt
-                  ? `Last synced: ${new Date(s.lastSyncAt).toLocaleString()}`
-                  : gmailConnected
-                    ? 'Connected'
-                    : 'No sync yet'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Badge variant={gmailConnected ? 'default' : 'outline'}>
-                {gmailConnected ? 'Connected' : 'Not Connected'}
-              </Badge>
+          <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-900">Gmail</p>
+                  <Badge
+                    variant={gmailConnected ? 'default' : 'outline'}
+                    className={gmailConnected ? 'bg-green-100 text-green-700 hover:bg-green-100' : ''}
+                  >
+                    {gmailConnected ? 'Connected' : 'Not connected'}
+                  </Badge>
+                </div>
+                <p className="text-sm text-gray-600">
+                  {gmailConnected ? connectedGmail || 'Connected Gmail account' : 'Connect Gmail to start syncing mail.'}
+                </p>
+                <p className="text-xs text-gray-400">
+                  {syncData?.lastSyncAt
+                    ? `Last synced ${new Date(syncData.lastSyncAt).toLocaleString()}`
+                    : gmailConnected
+                      ? 'Connection is ready. Your next sync will use the current window below.'
+                      : 'Read-only OAuth connection. We never send, delete, or edit your emails.'}
+                </p>
+              </div>
 
               {gmailConnected ? (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
                   onClick={() => disconnectMutation.mutate()}
-                  disabled={disconnectMutation.isPending}
+                  disabled={isBusy}
                 >
-                  {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+                  {disconnectMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Unplug className="h-3.5 w-3.5" />
+                  )}
+                  Disconnect Gmail
                 </Button>
               ) : (
-                <a href="/api/auth/google">
-                  <Button size="sm">Connect Gmail</Button>
+                <a href="/api/auth/google" className="self-start">
+                  <Button size="sm" className="gap-2">
+                    <Mail className="h-3.5 w-3.5" />
+                    Connect Gmail
+                  </Button>
                 </a>
               )}
             </div>
           </div>
 
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm">Outlook</p>
-              <p className="text-xs text-gray-500">Coming soon</p>
-            </div>
-            <Badge variant="outline">Not Connected</Badge>
-          </div>
-
-          <p className="text-[11px] text-gray-400">
-            Connect your email accounts to sync and classify emails. You can connect multiple providers.
-          </p>
+          <InlineNotice variant="info">
+            <p className="text-sm">
+              Outlook and additional providers can be added later. For now, the settings flow is optimized for one Gmail connection.
+            </p>
+          </InlineNotice>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Email Sync Window</CardTitle>
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Clock3 className="h-4 w-4 text-blue-700" />
+            Email Sync Window
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div>
-            <p className="text-sm font-medium">Choose how far back to sync emails</p>
+        <CardContent className="space-y-4">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">{syncSummary.label}</p>
+                <p className="mt-1 text-sm text-blue-800/80">{syncSummary.helper}</p>
+              </div>
+              {syncSummary.exactPreset ? (
+                <Badge className="bg-white text-blue-800 hover:bg-white">Preset active</Badge>
+              ) : (
+                <Badge variant="outline" className="border-blue-200 bg-white/80 text-blue-800">
+                  Custom date in use
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-900">Choose how far back new syncs should look</p>
             <p className="text-xs text-gray-500">
-              Default is 15 days. Changing to an earlier date lets you backfill older emails on the next sync.
+              Changing this only affects future sync runs. Pick a wider window when you want to backfill older email.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {[7, 15, 30, 90].map((days) => (
-              <Button
-                key={days}
-                type="button"
-                variant={currentDays === days ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => syncRangeMutation.mutate(days)}
-                disabled={syncRangeMutation.isPending}
-              >
-                {days} days
-              </Button>
-            ))}
+            {SYNC_PRESETS.map((days) => {
+              const isActive = syncSummary.exactPreset === days
+
+              return (
+                <Button
+                  key={days}
+                  type="button"
+                  variant={isActive ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => syncRangeMutation.mutate(days)}
+                  disabled={isBusy}
+                >
+                  {syncRangeMutation.isPending && isActive ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  {days} days
+                </Button>
+              )
+            })}
           </div>
 
-          <p className="text-[11px] text-gray-400">
-            After updating this setting, click Sync to fetch emails from the new range.
-          </p>
+          <InlineNotice variant="warning">
+            <p className="text-sm">
+              After you change the sync window, run sync again to pull mail from the new range.
+            </p>
+          </InlineNotice>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Shield className="h-4 w-4" />
-            Privacy &amp; Data
+            <Shield className="h-4 w-4 text-blue-700" />
+            Privacy and Data Handling
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-gray-600">
-          <p>EmailFlow AI reads your emails with read-only access to create tasks.</p>
-          <ul className="list-disc space-y-1 pl-4 text-xs">
-            <li>We cannot send, delete, or modify your emails</li>
-            <li>Email content is processed by AI (Claude/OpenAI) for classification</li>
-            <li>We use zero-data-retention API tiers where available</li>
-            <li>You can disconnect and delete all data at any time</li>
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card className="border-red-200">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base text-red-600">
-            <Trash2 className="h-4 w-4" />
-            Danger Zone
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-gray-500">
-            Disconnecting will revoke email access and stop syncing. Your existing tasks
-            will remain until you delete your account.
-          </p>
-          <Button
-            variant="outline"
-            className="border-red-200 text-red-600 hover:bg-red-50"
-            onClick={() => disconnectMutation.mutate()}
-            disabled={disconnectMutation.isPending || !gmailConnected}
-          >
-            {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect Gmail'}
-          </Button>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <InfoTile
+              icon={<Mail className="h-4 w-4 text-blue-700" />}
+              title="Read-only access"
+              body="EmailFlow AI reads email to classify threads and extract tasks. It cannot send or delete mail."
+            />
+            <InfoTile
+              icon={<Lock className="h-4 w-4 text-blue-700" />}
+              title="Processing"
+              body="Email content is processed by AI providers for classification and summarization using the safeguards configured by the product."
+            />
+            <InfoTile
+              icon={<RotateCcw className="h-4 w-4 text-blue-700" />}
+              title="Disconnect anytime"
+              body="Disconnecting Gmail stops future sync runs. Existing tasks and stored records remain until you clear account data."
+            />
+            <InfoTile
+              icon={<Shield className="h-4 w-4 text-blue-700" />}
+              title="Low-friction review"
+              body="The settings flow is designed to make connection state, sync range, and password recovery easy to audit."
+            />
+          </div>
         </CardContent>
       </Card>
     </div>
   )
 }
 
-/* ========== PASSWORD CARD ========== */
 function PasswordCard() {
-  type Mode = 'idle' | 'change' | 'reset-sent'
-  const [mode, setMode] = useState<Mode>('idle')
+  const [mode, setMode] = useState<'idle' | 'change'>('idle')
+  const [resetSent, setResetSent] = useState(false)
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
   const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState('')
+  const [isChanging, setIsChanging] = useState(false)
+  const [isSendingReset, setIsSendingReset] = useState(false)
 
   function resetForm() {
-    setCurrentPw(''); setNewPw(''); setConfirmPw('')
-    setShowCurrent(false); setShowNew(false)
+    setCurrentPw('')
+    setNewPw('')
+    setConfirmPw('')
+    setShowCurrent(false)
+    setShowNew(false)
+    setShowConfirm(false)
     setError('')
     setMode('idle')
   }
 
-  async function handleChangePassword(e: React.SyntheticEvent<HTMLFormElement>) {
+  async function handleChangePassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
-    setLoading(true)
+    setResetSent(false)
+
+    if (newPw.length < 8) {
+      setError('New password must be at least 8 characters long.')
+      return
+    }
+
+    if (newPw !== confirmPw) {
+      setError('New password and confirmation do not match.')
+      return
+    }
+
+    setIsChanging(true)
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw, confirmPassword: confirmPw }),
+        body: JSON.stringify({
+          currentPassword: currentPw,
+          newPassword: newPw,
+          confirmPassword: confirmPw,
+        }),
       })
+
       const data = await res.json()
       if (!data.success) {
         setError(data.error || 'Failed to update password')
@@ -291,135 +386,191 @@ function PasswordCard() {
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
-      setLoading(false)
+      setIsChanging(false)
     }
   }
 
   async function handleSendReset() {
     setError('')
-    setLoading(true)
+    setIsSendingReset(true)
     try {
       const res = await fetch('/api/auth/request-password-reset', { method: 'POST' })
       const data = await res.json()
       if (!data.success) {
         setError(data.error || 'Failed to send reset email')
       } else {
-        setMode('reset-sent')
+        setResetSent(true)
+        toast.success('Reset link sent')
       }
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
-      setLoading(false)
+      setIsSendingReset(false)
     }
   }
 
+  const busy = isChanging || isSendingReset
+
   return (
-    <Card>
-      <CardHeader>
+    <Card className="border-white/80 bg-white/95 shadow-sm">
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <KeyRound className="h-4 w-4" />
+          <KeyRound className="h-4 w-4 text-blue-700" />
           Password
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        {mode === 'idle' && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">Update your login password</p>
-            <Button variant="outline" size="sm" onClick={() => setMode('change')}>
-              Change password
-            </Button>
-          </div>
+      <CardContent className="space-y-4">
+        {resetSent && (
+          <InlineNotice variant="success" className="items-center">
+            <div className="flex flex-1 items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Reset link sent</p>
+                <p className="text-xs">Check your inbox and use the link there if you prefer a full password reset.</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setResetSent(false)}>
+                Dismiss
+              </Button>
+            </div>
+          </InlineNotice>
         )}
 
-        {mode === 'reset-sent' && (
-          <div className="flex items-center gap-3 rounded-lg bg-green-50 px-4 py-3">
-            <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
-            <div>
-              <p className="text-sm font-medium text-green-800">Reset link sent</p>
-              <p className="text-xs text-green-600">Check your inbox and click the link to set a new password.</p>
+        {error && <InlineNotice variant="error">{error}</InlineNotice>}
+
+        {mode === 'idle' ? (
+          <div className="flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-gray-900">Keep your login secure</p>
+              <p className="text-sm text-gray-500">
+                Change your password here or send yourself a reset link if you want to restart the flow from email.
+              </p>
             </div>
-            <button onClick={resetForm} className="ml-auto text-xs text-green-600 hover:underline">Dismiss</button>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handleSendReset} disabled={busy} className="gap-2">
+                {isSendingReset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                Send reset link
+              </Button>
+              <Button size="sm" onClick={() => setMode('change')}>
+                Change password
+              </Button>
+            </div>
           </div>
-        )}
+        ) : (
+          <form onSubmit={handleChangePassword} className="space-y-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
+            <PasswordField
+              id="current-password"
+              label="Current password"
+              value={currentPw}
+              onChange={setCurrentPw}
+              visible={showCurrent}
+              onToggleVisibility={() => setShowCurrent((prev) => !prev)}
+            />
 
-        {mode === 'change' && (
-          <form onSubmit={handleChangePassword} className="space-y-3">
-            {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
-            )}
+            <PasswordField
+              id="new-password"
+              label="New password"
+              value={newPw}
+              onChange={setNewPw}
+              visible={showNew}
+              onToggleVisibility={() => setShowNew((prev) => !prev)}
+              placeholder="At least 8 characters"
+            />
 
-            {/* Current password */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-700">Current password</label>
-              <div className="relative">
-                <input
-                  type={showCurrent ? 'text' : 'password'}
-                  value={currentPw}
-                  onChange={(e) => setCurrentPw(e.target.value)}
-                  required
-                  className="w-full rounded-lg border px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-                <button type="button" onClick={() => setShowCurrent((p) => !p)}
-                  className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-700">
-                  {showCurrent ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
+            <PasswordField
+              id="confirm-password"
+              label="Confirm new password"
+              value={confirmPw}
+              onChange={setConfirmPw}
+              visible={showConfirm}
+              onToggleVisibility={() => setShowConfirm((prev) => !prev)}
+              placeholder="Re-enter your new password"
+            />
 
-            {/* New password */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-700">New password</label>
-              <div className="relative">
-                <input
-                  type={showNew ? 'text' : 'password'}
-                  value={newPw}
-                  onChange={(e) => setNewPw(e.target.value)}
-                  required
-                  minLength={8}
-                  placeholder="Min. 8 characters"
-                  className="w-full rounded-lg border px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-                <button type="button" onClick={() => setShowNew((p) => !p)}
-                  className="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-700">
-                  {showNew ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Confirm password */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-700">Confirm new password</label>
-              <input
-                type="password"
-                value={confirmPw}
-                onChange={(e) => setConfirmPw(e.target.value)}
-                required
-                placeholder="Re-enter new password"
-                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-2 pt-1">
-              <button type="button" onClick={resetForm}
-                className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="button" variant="outline" className="flex-1" onClick={resetForm} disabled={busy}>
                 Cancel
-              </button>
-              <button type="submit" disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                Save
-              </button>
+              </Button>
+              <Button type="submit" className="flex-1 gap-2" disabled={busy}>
+                {isChanging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Save password
+              </Button>
             </div>
 
-            {/* Send reset email instead */}
-            <button type="button" onClick={handleSendReset} disabled={loading}
-              className="w-full pt-1 text-center text-xs text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-50">
-              Or send a reset link to my email instead
-            </button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleSendReset}
+              disabled={busy}
+              className="w-full"
+            >
+              {isSendingReset ? 'Sending reset link...' : 'Or send a reset link instead'}
+            </Button>
           </form>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  onChange,
+  visible,
+  onToggleVisibility,
+  placeholder,
+}: {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  visible: boolean
+  onToggleVisibility: () => void
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          required
+          placeholder={placeholder}
+          className="h-10 bg-white pr-10"
+        />
+        <button
+          type="button"
+          onClick={onToggleVisibility}
+          className="absolute inset-y-0 right-3 flex items-center text-gray-400 transition-colors hover:text-gray-700"
+        >
+          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function InfoTile({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode
+  title: string
+  body: string
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
+      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
+        {icon}
+      </div>
+      <p className="text-sm font-semibold text-gray-900">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-gray-600">{body}</p>
+    </div>
   )
 }

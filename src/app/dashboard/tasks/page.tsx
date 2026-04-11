@@ -5,7 +5,22 @@ import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { InlineNotice } from '@/components/inline-notice'
+import { PageHeader } from '@/components/page-header'
+import { SegmentedControl } from '@/components/segmented-control'
+import { StatePanel } from '@/components/state-panel'
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
   Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, ChevronDown, FolderOpen,
@@ -17,6 +32,63 @@ import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 
 type ViewMode = 'list' | 'timeline' | 'calendar'
+type TaskStatus = 'pending' | 'confirmed' | 'completed' | 'dismissed'
+
+type TaskEmailLink = {
+  email?: {
+    sender?: string | null
+  } | null
+}
+
+type TaskItem = {
+  id: string
+  title: string
+  summary?: string | null
+  status: TaskStatus
+  priorityScore?: number | null
+  explicitDeadline?: string | null
+  inferredDeadline?: string | null
+  userSetDeadline?: string | null
+  emailLinks?: TaskEmailLink[]
+}
+
+type MatterItem = {
+  id: string
+  title: string
+  status: string
+  topic: string
+  summary?: string | null
+  nextAction?: string | null
+  lastMessageAt?: string | null
+  taskIds: string[]
+}
+
+type TaskUpdateData = {
+  status?: TaskStatus
+  userSetDeadline?: string | null
+}
+
+type TaskUpdateVars = {
+  id: string
+  data: TaskUpdateData
+}
+
+type MutationLike = {
+  mutate: (vars: TaskUpdateVars, options?: { onSuccess?: () => void }) => void
+}
+
+type QueryResponse<T> = {
+  data?: T
+  meta?: {
+    totalCount?: number
+  }
+}
+
+type CreateTaskResponse = {
+  data: {
+    id: string
+  }
+}
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
@@ -50,7 +122,7 @@ export default function TasksPage() {
     queryKey: ['matters'],
     queryFn: () => fetch('/api/matters').then((r) => r.json()),
   })
-  const matters: any[] = mattersRes?.data || []
+  const matters: MatterItem[] = mattersRes?.data || []
 
   const handleModalOpenChange = (open: boolean) => {
     setShowCreateModal(open)
@@ -78,7 +150,7 @@ export default function TasksPage() {
       })
 
       if (res.ok) {
-        const data = await res.json()
+        const data: CreateTaskResponse = await res.json()
         queryClient.invalidateQueries({ queryKey: ['tasks'] })
         toast.success('Task created')
         setShowCreateModal(false)
@@ -89,7 +161,7 @@ export default function TasksPage() {
       } else {
         toast.error('Failed to create task')
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to create task')
     } finally {
       setCreatingTask(false)
@@ -97,7 +169,7 @@ export default function TasksPage() {
   }
 
   const updateTask = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) =>
+    mutationFn: ({ id, data }: TaskUpdateVars) =>
       fetch(`/api/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -109,98 +181,66 @@ export default function TasksPage() {
     },
   })
 
-  const tasks = res?.data || []
+  const tasks: TaskItem[] = (res as QueryResponse<TaskItem[]>)?.data || []
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-sm text-gray-500">{res?.meta?.totalCount || 0} tasks</p>
-        </div>
-
-        {/* Create button + View mode toggle */}
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            className="gap-2 bg-blue-600 hover:bg-blue-700"
-            size="sm"
-          >
-            <Plus className="h-4 w-4" />
-            New Task
-          </Button>
-          <div className="flex rounded-lg border bg-white p-0.5">
-            {([
-              { mode: 'list' as const, icon: List, label: 'List' },
-              { mode: 'timeline' as const, icon: GanttChart, label: 'Timeline' },
-              { mode: 'calendar' as const, icon: Calendar, label: 'Calendar' },
-            ]).map(({ mode, icon: Icon, label }) => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  viewMode === mode
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-500 hover:text-gray-900'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title="Tasks"
+        description="Track what needs review, what is active, and what is already done."
+        meta={`${res?.meta?.totalCount || 0} tasks`}
+        actions={
+          <>
+            <SegmentedControl
+              value={viewMode}
+              onChange={setViewMode}
+              options={[
+                { value: 'list', label: 'List', icon: <List className="h-3.5 w-3.5" /> },
+                { value: 'timeline', label: 'Timeline', icon: <GanttChart className="h-3.5 w-3.5" /> },
+                { value: 'calendar', label: 'Calendar', icon: <Calendar className="h-3.5 w-3.5" /> },
+              ]}
+            />
+            <Button onClick={() => setShowCreateModal(true)} className="gap-2" size="sm">
+              <Plus className="h-4 w-4" />
+              New Task
+            </Button>
+          </>
+        }
+      />
 
       {/* Filter bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex rounded-lg border bg-white p-0.5">
-          {STATUS_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setStatusFilter(opt.value)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                statusFilter === opt.value
-                  ? 'bg-gray-900 text-white shadow-sm'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+      <div className="rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={STATUS_OPTIONS}
+        />
 
-        <div className="flex rounded-lg border bg-white p-0.5">
-          {[{ value: 'priority', label: 'Priority' }, { value: 'deadline', label: 'Deadline' }].map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setSortBy(opt.value)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                sortBy === opt.value
-                  ? 'bg-gray-900 text-white shadow-sm'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <SegmentedControl
+          value={sortBy}
+          onChange={setSortBy}
+          options={[
+            { value: 'priority', label: 'Priority' },
+            { value: 'deadline', label: 'Deadline' },
+          ]}
+        />
         </div>
       </div>
 
       {/* Content */}
       {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-lg border bg-gray-100" />
-          ))}
-        </div>
+        <StatePanel
+          loading
+          title="Loading tasks"
+          description="Pulling together your current work items."
+        />
       ) : tasks.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-gray-400">No tasks found with the selected filters.</p>
-          </CardContent>
-        </Card>
+        <StatePanel
+          icon={<FolderOpen className="h-5 w-5 text-gray-400" />}
+          title="No tasks found"
+          description="Try a different filter or create a task manually."
+        />
       ) : viewMode === 'list' ? (
         <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
       ) : viewMode === 'timeline' ? (
@@ -214,50 +254,55 @@ export default function TasksPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Create New Task</DialogTitle>
+            <DialogDescription>
+              Add a manual task when work starts outside the email pipeline.
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 mt-1">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
-              <input
-                type="text"
+          <div className="mt-1 space-y-4">
+            {!taskTitle.trim() && creatingTask ? (
+              <InlineNotice variant="warning">A task title is required before you can create it.</InlineNotice>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="manual-task-title">Task Title</Label>
+              <Input
+                id="manual-task-title"
                 value={taskTitle}
                 onChange={(e) => setTaskTitle(e.target.value)}
                 placeholder="Enter task title"
-                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="h-10"
                 autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleCreateTask() }}
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
-              <textarea
+            <div className="space-y-2">
+              <Label htmlFor="manual-task-summary">Summary</Label>
+              <Textarea
+                id="manual-task-summary"
                 value={taskSummary}
                 onChange={(e) => setTaskSummary(e.target.value)}
                 placeholder="Brief description (optional)"
                 rows={3}
-                className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 resize-none"
+                className="resize-none"
               />
             </div>
           </div>
 
-          <div className="flex gap-3 mt-2">
+          <DialogFooter className="mt-2">
             <DialogClose
-              render={
-                <button className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors" />
-              }
+              render={<Button className="flex-1" variant="outline" />}
             >
               Cancel
             </DialogClose>
-            <button
+            <Button
               onClick={handleCreateTask}
               disabled={creatingTask || !taskTitle.trim()}
-              className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="flex-1"
             >
-              {creatingTask ? 'Creating…' : 'Create Task'}
-            </button>
-          </div>
+              {creatingTask ? 'Creating...' : 'Create Task'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
@@ -265,10 +310,10 @@ export default function TasksPage() {
 }
 
 /* ========== LIST VIEW — matter-grouped ========== */
-function TaskListView({ tasks, updateTask, matters }: { tasks: any[]; updateTask: any; matters: any[] }) {
+function TaskListView({ tasks, updateTask, matters }: { tasks: TaskItem[]; updateTask: MutationLike; matters: MatterItem[] }) {
   // Build taskId → matter map
   const taskToMatter = useMemo(() => {
-    const map = new Map<string, any>()
+    const map = new Map<string, MatterItem>()
     for (const matter of matters) {
       for (const taskId of matter.taskIds) {
         map.set(taskId, matter)
@@ -279,8 +324,8 @@ function TaskListView({ tasks, updateTask, matters }: { tasks: any[]; updateTask
 
   // Group tasks by matter; unmatched → ungrouped
   const { matterGroups, ungrouped } = useMemo(() => {
-    const grouped = new Map<string, { matter: any; tasks: any[] }>()
-    const ungrouped: any[] = []
+    const grouped = new Map<string, { matter: MatterItem; tasks: TaskItem[] }>()
+    const ungrouped: TaskItem[] = []
     for (const task of tasks) {
       const matter = taskToMatter.get(task.id)
       if (matter) {
@@ -303,17 +348,21 @@ function TaskListView({ tasks, updateTask, matters }: { tasks: any[]; updateTask
   const toggle = (id: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
 
   if (tasks.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <p className="text-gray-400">No tasks found with the selected filters.</p>
-        </CardContent>
-      </Card>
+      <StatePanel
+        icon={<FolderOpen className="h-5 w-5 text-gray-400" />}
+        title="No tasks found"
+        description="Try a different filter or create a task manually."
+      />
     )
   }
 
@@ -357,10 +406,10 @@ const STATUS_COLORS: Record<string, string> = {
 function MatterSection({
   matter, tasks, updateTask, collapsed, onToggle,
 }: {
-  matter: any | null; tasks: any[]; updateTask: any; collapsed: boolean; onToggle: () => void
+  matter: MatterItem | null; tasks: TaskItem[]; updateTask: MutationLike; collapsed: boolean; onToggle: () => void
 }) {
   return (
-    <div className="rounded-xl border bg-white overflow-hidden shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white/95 shadow-sm">
       {/* Section header */}
       <button
         onClick={onToggle}
@@ -395,8 +444,8 @@ function MatterSection({
 
       {/* Task rows */}
       {!collapsed && (
-        <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-gray-50/40">
-          {tasks.map((task: any) => (
+        <div className="space-y-2 border-t bg-gray-50/50 px-3 pb-3 pt-1">
+          {tasks.map((task) => (
             <TaskRow key={task.id} task={task} updateTask={updateTask} />
           ))}
           {matter?.nextAction && (
@@ -456,7 +505,7 @@ function TaskListViewFlat({ tasks, updateTask }: { tasks: any[]; updateTask: any
 ========== END FLAT VIEW ========== */
 
 /* ========== TASK ROW ========== */
-function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
+function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLike }) {
   const band = getPriorityBand(task.priorityScore || 0)
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const isOverdue = deadline && new Date(deadline) < new Date() && (task.status === 'pending' || task.status === 'confirmed')
@@ -479,7 +528,7 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
 
   return (
     <div
-      className={`group flex items-center gap-3 rounded-lg border px-3 transition-all ${
+      className={`group flex items-center gap-3 rounded-xl border px-3 transition-all ${
         isPending
           ? 'border-purple-200 bg-purple-50/30 hover:border-purple-300 hover:shadow-md py-3.5'
           : isDone
@@ -601,7 +650,7 @@ function TaskRow({ task, updateTask }: { task: any; updateTask: any }) {
 }
 
 /* ========== CALENDAR VIEW ========== */
-function TaskCalendarView({ tasks, updateTask }: { tasks: any[]; updateTask: any }) {
+function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: MutationLike }) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
@@ -622,7 +671,7 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: any[]; updateTask: any
 
   // Group ALL tasks by date (not just current month)
   const tasksByDate = useMemo(() => {
-    const map: Record<string, any[]> = {}
+    const map: Record<string, TaskItem[]> = {}
     for (const task of tasks) {
       const raw = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
       if (!raw) continue
@@ -650,17 +699,6 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: any[]; updateTask: any
         )
       }
     }
-  }, [updateTask])
-
-  const handleClickDate = useCallback((dayDate: Date, taskId: string) => {
-    const y = dayDate.getFullYear()
-    const m = String(dayDate.getMonth() + 1).padStart(2, '0')
-    const d = String(dayDate.getDate()).padStart(2, '0')
-    const dateStr = `${y}-${m}-${d}`
-    updateTask.mutate(
-      { id: taskId, data: { userSetDeadline: dateStr } },
-      { onSuccess: () => toast.success('Deadline updated') }
-    )
   }, [updateTask])
 
   const monthLabel = currentMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })
@@ -726,7 +764,7 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: any[]; updateTask: any
                   {cell.day}
                 </div>
                 <div className="space-y-1">
-                  {dayTasks.map((task: any) => {
+                  {dayTasks.map((task) => {
                     const band = getPriorityBand(task.priorityScore || 0)
                     const bgColor = band === 'critical' ? 'bg-red-100 border-red-300 text-red-800'
                       : band === 'high' ? 'bg-orange-100 border-orange-300 text-orange-800'

@@ -2,7 +2,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Zap, Loader2, CheckCircle2, ArrowLeft, CheckSquare, FolderOpen, Clock } from 'lucide-react'
+import { CheckCircle2, Loader2 } from 'lucide-react'
+
+import { AuthShell } from '@/components/auth-shell'
+import { InlineNotice } from '@/components/inline-notice'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -34,129 +39,62 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      {/* ── Left: brand panel ── */}
-      <div className="relative hidden lg:flex lg:w-[420px] xl:w-[480px] flex-col border-r bg-gray-50 p-12">
-        <Link href="/landing" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
-            <Zap className="h-4 w-4 text-white" />
-          </div>
-          <span className="text-base font-bold text-gray-900">EmailFlow AI</span>
-        </Link>
-
-        <div className="mt-auto">
-          <h2 className="text-2xl font-bold leading-snug text-gray-900">
-            Your inbox, turned into
-            <br />a clear action list
-          </h2>
-          <p className="mt-3 text-sm leading-relaxed text-gray-500">
-            AI reads your emails, extracts what needs doing, and keeps everything organised by project.
-          </p>
-
-          <ul className="mt-8 space-y-4">
-            {[
-              { icon: CheckSquare, text: 'Tasks extracted from email threads' },
-              { icon: FolderOpen, text: 'Emails grouped by project automatically' },
-              { icon: Clock, text: 'Priorities and deadlines surfaced daily' },
-            ].map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3 text-sm text-gray-600">
-                <Icon className="h-4 w-4 shrink-0 text-blue-600" />
-                {text}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <p className="mt-12 text-xs text-gray-400">© {new Date().getFullYear()} EmailFlow AI</p>
-      </div>
-
-      {/* ── Right: form panel ── */}
-      <div className="flex flex-1 flex-col items-center justify-center bg-white px-6 py-12">
-        {/* Mobile logo */}
-        <div className="mb-8 lg:hidden">
-          <Link href="/landing" className="inline-flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
-              <Zap className="h-4 w-4 text-white" />
-            </div>
-            <span className="text-base font-bold text-gray-900">EmailFlow AI</span>
+    <AuthShell
+      title={sent ? 'Check your inbox' : 'Reset your password'}
+      description={
+        sent
+          ? `We've sent a reset link to ${email}. It expires in 1 hour.`
+          : "Enter your email and we'll send you a reset link."
+      }
+      footer={
+        <p className="text-center text-sm text-gray-500">
+          <Link href="/auth/signin" className="text-blue-600 hover:underline">
+            Back to sign in
           </Link>
-        </div>
-
-        <div className="w-full max-w-[360px]">
-          {sent ? (
-            <div className="space-y-5 text-center">
-              <div className="flex justify-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
-                  <CheckCircle2 className="h-6 w-6 text-green-600" />
-                </div>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Check your inbox</h1>
-                <p className="mt-2 text-sm text-gray-500">
-                  If <span className="font-medium text-gray-700">{email}</span> has an account,
-                  we&apos;ve sent a reset link. It expires in 1 hour.
-                </p>
-              </div>
-              <Link
-                href="/auth/signin"
-                className="block w-full rounded-lg border border-gray-200 px-4 py-2.5 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-              >
-                Back to sign in
-              </Link>
-              <button
-                onClick={() => { setSent(false); setEmail('') }}
-                className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
-              >
-                Try a different email
-              </button>
+        </p>
+      }
+    >
+      {sent ? (
+        <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm text-center">
+          <div className="flex justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+              <CheckCircle2 className="h-6 w-6 text-green-600" />
             </div>
-          ) : (
-            <>
-              <div className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900">Reset your password</h1>
-                <p className="mt-1 text-sm text-gray-500">
-                  Enter your email and we&apos;ll send you a reset link.
-                </p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-5">
-                {error && (
-                  <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
-                )}
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    required
-                    autoFocus
-                    className="w-full rounded-lg border border-gray-200 px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition-all focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Send reset link
-                </button>
-              </form>
-            </>
-          )}
-
-          <p className="mt-8 text-center text-sm text-gray-500">
-            <Link href="/auth/signin" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to sign in
-            </Link>
+          </div>
+          <p className="text-sm text-gray-500">
+            Didn&apos;t receive it?{' '}
+            <button
+              type="button"
+              onClick={() => { setSent(false); setEmail('') }}
+              className="text-blue-600 hover:underline"
+            >
+              Try a different email
+            </button>
           </p>
         </div>
-      </div>
-    </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Email</label>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              required
+              autoFocus
+              className="h-10 px-3"
+            />
+          </div>
+
+          <Button type="submit" disabled={loading} className="h-10 w-full gap-2">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Send reset link
+          </Button>
+        </form>
+      )}
+    </AuthShell>
   )
 }

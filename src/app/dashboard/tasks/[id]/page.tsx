@@ -8,9 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { PageHeader } from '@/components/page-header'
+import { StatePanel } from '@/components/state-panel'
+import { InlineNotice } from '@/components/inline-notice'
 import {
-  ArrowLeft, Mail, Save, Calendar, TrendingUp, ExternalLink,
-  CheckCircle2, ListChecks, FileText, Clock, Sparkles, ThumbsUp,
+  ArrowLeft, Mail, Calendar, TrendingUp, ExternalLink,
+  CheckCircle2, ListChecks, FileText, Sparkles, ThumbsUp,
   X, Check, AlertTriangle, Shield, RotateCcw, Square, CheckSquare, Plus,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
@@ -25,7 +28,29 @@ interface ChecklistItem {
   completed: boolean
 }
 
-function parseActionItems(raw: any): ChecklistItem[] {
+type TaskUpdatePayload = {
+  title?: string
+  summary?: string
+  userSetDeadline?: string | null
+  urgency?: number
+  impact?: number
+  userNotes?: string
+  status?: string
+  actionItems?: string
+  checkedActionItems?: string
+}
+
+type TaskEmailLink = {
+  id: string
+  email: {
+    id: string
+    subject: string
+    sender?: string | null
+    receivedAt: string
+  }
+}
+
+function parseActionItems(raw: unknown): ChecklistItem[] {
   if (!raw) return []
 
   try {
@@ -181,7 +206,7 @@ export default function TaskDetailPage() {
 
         // 默认展开所有有子任务的项目
         const expandedByDefault = new Set<string>()
-        itemsWithStatus.forEach((item, idx) => {
+        itemsWithStatus.forEach((item) => {
           if (hasChildren(itemsWithStatus, item.id)) {
             expandedByDefault.add(item.id)
           }
@@ -194,7 +219,7 @@ export default function TaskDetailPage() {
   }, [task])
 
   const updateTask = useMutation({
-    mutationFn: (data: any) =>
+    mutationFn: (data: TaskUpdatePayload) =>
       fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -341,7 +366,6 @@ export default function TaskDetailPage() {
     const itemIndex = checklistItems.findIndex(i => i.id === id)
     if (itemIndex <= 0) return
 
-    const item = checklistItems[itemIndex]
     const prevItem = checklistItems[itemIndex - 1]
 
     // 只能变成前一项的下一级，且最多到level 2
@@ -367,7 +391,7 @@ export default function TaskDetailPage() {
       } else {
         toast.error('Failed to unlink email')
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to unlink email')
     } finally {
       setUnlinkingEmailId(null)
@@ -376,27 +400,32 @@ export default function TaskDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="animate-in fade-in mx-auto max-w-6xl space-y-4">
-        <div className="h-8 w-32 animate-pulse rounded bg-gray-200" />
-        <div className="h-64 animate-pulse rounded-xl border bg-gray-100" />
-        <div className="h-40 animate-pulse rounded-xl border bg-gray-100" />
-      </div>
+      <StatePanel
+        loading
+        title="Loading task"
+        description="Pulling the latest task details, checklist state, and linked emails."
+      />
     )
   }
 
   if (!task) {
     return (
-      <div className="mx-auto max-w-6xl">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 mb-4">
-          <ArrowLeft className="h-4 w-4" />
-          Back to tasks
-        </Button>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <ListChecks className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-            <p className="text-gray-400">Task not found.</p>
-          </CardContent>
-        </Card>
+      <div className="space-y-4">
+        <PageHeader
+          title="Task unavailable"
+          description="We couldn't find this task in the current workspace."
+          actions={(
+            <Button variant="outline" onClick={() => router.push('/dashboard/tasks')} className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to tasks
+            </Button>
+          )}
+        />
+        <StatePanel
+          icon={<ListChecks className="h-5 w-5 text-gray-400" />}
+          title="Task not found"
+          description="It may have been removed or is no longer visible from this account."
+        />
       </div>
     )
   }
@@ -405,29 +434,32 @@ export default function TaskDetailPage() {
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const sts = statusConfig[task.status] || statusConfig.pending
   const StsIcon = sts.icon
-  const isDone = task.status === 'completed' || task.status === 'dismissed'
 
   return (
-    <div className="animate-in fade-in duration-200">
-      {/* Back button — full width, sticks to the left edge */}
-      <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/tasks')} className="gap-2 text-gray-500 hover:text-gray-900 mb-4 -ml-1">
-        <ArrowLeft className="h-4 w-4" />
-        Back to tasks
-      </Button>
+    <div className="animate-in fade-in space-y-5 duration-200">
+      <PageHeader
+        title={task.title}
+        description="Review task details, refine AI output, and keep linked source emails in sync."
+        meta={`Created ${new Date(task.createdAt).toLocaleDateString('en', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })} • ${task.emailLinks?.length || 0} linked email${task.emailLinks?.length === 1 ? '' : 's'}`}
+        actions={(
+          <Button variant="outline" onClick={() => router.push('/dashboard/tasks')} className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back to tasks
+          </Button>
+        )}
+      />
 
-      {/* Two-column layout */}
       <div className="mx-auto max-w-6xl space-y-5">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Task content */}
         <div className="lg:col-span-2 space-y-4">
           {/* Header card */}
-          <Card className={`bg-gradient-to-br ${sts.bg} overflow-hidden`}>
+          <Card className={`animate-fade-in-up stagger-2 overflow-hidden border-white/70 bg-gradient-to-br ${sts.bg} shadow-sm`}>
             <CardContent className="py-5 space-y-4">
-              {/* Title */}
-              <h1 className={`text-xl font-bold leading-snug ${isDone ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                {task.title}
-              </h1>
-
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={`gap-1 ${sts.color}`}>
@@ -448,58 +480,58 @@ export default function TaskDetailPage() {
 
               {/* Quick actions for pending */}
               {task.status === 'pending' && (
-                <div className="flex items-center gap-2 rounded-xl bg-purple-50/80 backdrop-blur-sm border border-purple-200 px-4 py-3">
-                  <AlertTriangle className="h-4 w-4 text-purple-600 shrink-0" />
-                  <span className="text-sm text-purple-700 flex-1">This task needs your review</span>
-                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 h-8" onClick={() => handleStatusChange('confirmed')}>
-                    <ThumbsUp className="h-3.5 w-3.5" />
-                    Confirm
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8 text-gray-500 hover:text-red-600 hover:border-red-200" onClick={() => handleStatusChange('dismissed')}>
-                    <X className="h-3.5 w-3.5" />
-                    Dismiss
-                  </Button>
-                </div>
+                <InlineNotice variant="warning" className="items-center justify-between gap-3">
+                  <span className="flex-1">This task still needs your review before it becomes active work.</span>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
+                      <ThumbsUp className="h-3.5 w-3.5" />
+                      Confirm
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
+                      <X className="h-3.5 w-3.5" />
+                      Dismiss
+                    </Button>
+                  </div>
+                </InlineNotice>
               )}
 
               {/* Quick actions for confirmed */}
               {task.status === 'confirmed' && (
-                <div className="flex items-center gap-2 rounded-xl bg-blue-50/80 backdrop-blur-sm border border-blue-200 px-4 py-3">
-                  <ThumbsUp className="h-4 w-4 text-blue-600 shrink-0" />
-                  <span className="text-sm text-blue-700 flex-1">Task confirmed — mark when done</span>
-                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1.5 h-8" onClick={() => handleStatusChange('completed')}>
-                    <Check className="h-3.5 w-3.5" />
-                    Complete
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8 text-gray-500 hover:text-red-600 hover:border-red-200" onClick={() => handleStatusChange('dismissed')}>
-                    <X className="h-3.5 w-3.5" />
-                    Dismiss
-                  </Button>
-                </div>
+                <InlineNotice variant="info" className="items-center justify-between gap-3">
+                  <span className="flex-1">Task confirmed and ready to track. Mark it complete when the work is done.</span>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('completed')}>
+                      <Check className="h-3.5 w-3.5" />
+                      Complete
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
+                      <X className="h-3.5 w-3.5" />
+                      Dismiss
+                    </Button>
+                  </div>
+                </InlineNotice>
               )}
 
               {/* Quick actions for completed */}
               {task.status === 'completed' && (
-                <div className="flex items-center gap-2 rounded-xl bg-green-50/80 backdrop-blur-sm border border-green-200 px-4 py-3">
-                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                  <span className="text-sm text-green-700 flex-1">Task completed</span>
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8 text-gray-500 hover:text-blue-600 hover:border-blue-200" onClick={() => handleStatusChange('confirmed')}>
+                <InlineNotice variant="success" className="items-center justify-between gap-3">
+                  <span className="flex-1">This task is marked complete. Reopen it if more work shows up.</span>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
                     <RotateCcw className="h-3.5 w-3.5" />
                     Reopen
                   </Button>
-                </div>
+                </InlineNotice>
               )}
 
               {/* Quick actions for dismissed */}
               {task.status === 'dismissed' && (
-                <div className="flex items-center gap-2 rounded-xl bg-gray-100/80 backdrop-blur-sm border border-gray-200 px-4 py-3">
-                  <X className="h-4 w-4 text-gray-400 shrink-0" />
-                  <span className="text-sm text-gray-500 flex-1">Task dismissed</span>
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8 text-gray-500 hover:text-purple-600 hover:border-purple-200" onClick={() => handleStatusChange('pending')}>
+                <InlineNotice className="items-center justify-between gap-3 border-gray-200 bg-gray-50 text-gray-700">
+                  <span className="flex-1">This task is currently dismissed. Bring it back if the email turns into real work later.</span>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('pending')}>
                     <RotateCcw className="h-3.5 w-3.5" />
                     Re-review
                   </Button>
-                </div>
+                </InlineNotice>
               )}
 
               {/* Summary */}
@@ -513,7 +545,7 @@ export default function TaskDetailPage() {
           </Card>
 
           {/* Task Info */}
-          <Card className={`bg-gradient-to-br ${sts.bg}`}>
+          <Card className={`animate-fade-in-up stagger-3 border-white/70 bg-gradient-to-br ${sts.bg} shadow-sm`}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                 <FileText className="h-4 w-4" />
@@ -849,7 +881,7 @@ export default function TaskDetailPage() {
         <div className="space-y-4">
           {/* AI Analysis */}
           {task.priorityReason && (
-            <Card className="border-yellow-200 bg-gradient-to-br from-yellow-50/50 to-white">
+            <Card className="animate-fade-in-up stagger-4 border-yellow-200 bg-gradient-to-br from-yellow-50/50 to-white shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="h-4 w-4 text-yellow-600" />
@@ -864,7 +896,7 @@ export default function TaskDetailPage() {
 
           {/* Checklist — fully editable */}
           {checklistItems.length > 0 && (
-            <Card>
+            <Card className="animate-fade-in-up stagger-5 border-white/70 bg-white/95 shadow-sm">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-sm">
@@ -1079,7 +1111,7 @@ export default function TaskDetailPage() {
 
           {/* Source Emails */}
           {task.emailLinks?.length > 0 && (
-            <Card>
+            <Card className="animate-fade-in-up stagger-6 border-white/70 bg-white/95 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Mail className="h-4 w-4 text-blue-600" />
@@ -1088,7 +1120,7 @@ export default function TaskDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {task.emailLinks.map((link: any) => {
+                {(task.emailLinks as TaskEmailLink[]).map((link) => {
                   const senderName = link.email.sender?.split('<')[0]?.trim()
                   const senderInitial = (senderName || 'U')[0].toUpperCase()
                   const isUnlinking = unlinkingEmailId === link.email.id
@@ -1134,7 +1166,7 @@ export default function TaskDetailPage() {
           )}
 
           {/* Task metadata */}
-          <Card>
+          <Card className="animate-fade-in-up stagger-7 border-white/70 bg-white/95 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Shield className="h-4 w-4 text-gray-400" />

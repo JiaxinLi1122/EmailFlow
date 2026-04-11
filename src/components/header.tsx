@@ -1,5 +1,6 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/use-auth'
 import {
   DropdownMenu,
@@ -7,13 +8,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { RefreshCw, User, LogOut } from 'lucide-react'
+import { RefreshCw, User, LogOut, ChevronRight } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 export function Header() {
   const { user, logout } = useAuth()
   const queryClient = useQueryClient()
+  const pathname = usePathname()
+
+  const segments = pathname.split('/').filter(Boolean)
+  const currentSection = segments[1] ? segments[1].replace(/-/g, ' ') : 'dashboard'
+  const sectionLabel = currentSection.charAt(0).toUpperCase() + currentSection.slice(1)
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -30,33 +37,40 @@ export function Header() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['stats'] })
       await queryClient.refetchQueries({ queryKey: ['stats'] })
+      toast.success('Email sync complete')
     },
 
     onError: (err) => {
       console.error('Sync failed:', err)
-      alert('Sync failed')
+      toast.error('Sync failed')
     },
   })
 
   return (
-    <header className="flex h-14 items-center justify-between border-b bg-white px-6">
-      <div />
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-gray-200/80 bg-white/85 px-6 backdrop-blur">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-gray-500">
+        <span className="font-medium text-gray-900">Workspace</span>
+        <ChevronRight className="h-4 w-4 text-gray-300" />
+        <span className="truncate">{sectionLabel}</span>
+      </div>
       <div className="flex items-center gap-3">
         <button
           onClick={() => syncMutation.mutate()}
           disabled={syncMutation.isPending}
-          title={syncMutation.isPending ? 'Syncing…' : 'Sync emails'}
+          title={syncMutation.isPending ? 'Syncing...' : 'Sync emails'}
           className={cn(
-            'rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors disabled:opacity-40',
+            'rounded-full border border-transparent p-2 text-gray-400 transition-colors hover:border-blue-100 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40'
           )}
         >
           <RefreshCw className={cn('h-4 w-4', syncMutation.isPending && 'animate-spin')} />
         </button>
 
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-gray-100">
-            <User className="h-4 w-4" />
-            <span>{user?.name || 'User'}</span>
+          <DropdownMenuTrigger className="inline-flex items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-3 py-1.5 text-sm shadow-sm transition-colors hover:bg-gray-50">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+              <User className="h-4 w-4" />
+            </div>
+            <span className="max-w-28 truncate">{user?.name || 'User'}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => logout()}>

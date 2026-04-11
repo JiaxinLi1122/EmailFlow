@@ -5,7 +5,13 @@ export const dynamic = 'force-dynamic'
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Zap, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+
+import { AuthShell } from '@/components/auth-shell'
+import { InlineNotice } from '@/components/inline-notice'
+import { StatePanel } from '@/components/state-panel'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 function VerifyTotpContent() {
   const router = useRouter()
@@ -47,37 +53,37 @@ function VerifyTotpContent() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 px-4">
-      <div className="w-full max-w-sm">
-        <div className="animate-fade-in-up stagger-1 mb-8 text-center">
-          <Link href="/landing" className="inline-flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
-            <span className="text-xl font-bold text-gray-900">EmailFlow AI</span>
+    <AuthShell
+      title="Two-factor authentication"
+      description="Enter the 6-digit code from your authenticator app."
+      footer={
+        <p className="text-center text-sm text-gray-500">
+          <Link href="/auth/signin" className="text-blue-600 hover:underline">
+            Back to sign in
           </Link>
-          <p className="mt-3 text-sm text-gray-500">Two-factor authentication</p>
-        </div>
-
-        <form
-          onSubmit={handleSubmit}
-          className="animate-scale-in stagger-2 space-y-4 rounded-xl border bg-white p-6 shadow-sm"
-        >
-          <div className="text-sm text-gray-600">
-            Enter the 6-digit code from your authenticator app.
-          </div>
-
-          {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
-              {error}
-            </div>
-          )}
+        </p>
+      }
+    >
+      {!tempToken ? (
+        <StatePanel
+          variant="danger"
+          title="Missing verification token"
+          description="Please sign in again to restart two-factor verification."
+          action={
+            <Link href="/auth/signin">
+              <Button variant="outline" size="sm">Back to sign in</Button>
+            </Link>
+          }
+        />
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
 
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Authenticator Code
+              Authenticator code
             </label>
-            <input
+            <Input
               type="text"
               inputMode="numeric"
               maxLength={6}
@@ -85,34 +91,29 @@ function VerifyTotpContent() {
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
               placeholder="6-digit code"
               required
-              className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="h-10 px-3"
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading || !tempToken}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-700 hover:shadow-md disabled:opacity-50 active:scale-[0.98]"
-          >
+          <Button type="submit" disabled={loading} className="h-10 w-full gap-2">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Verify
-          </button>
-
-          <Link
-            href="/auth/signin"
-            className="block text-center text-sm text-blue-600 hover:underline"
-          >
-            Back to login
-          </Link>
+          </Button>
         </form>
-      </div>
-    </div>
+      )}
+    </AuthShell>
   )
 }
 
 export default function VerifyTotpPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-center">Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="p-6">
+          <StatePanel loading title="Loading verification" description="Preparing your sign-in session." />
+        </div>
+      }
+    >
       <VerifyTotpContent />
     </Suspense>
   )

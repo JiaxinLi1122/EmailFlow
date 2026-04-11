@@ -1,14 +1,43 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Mail, CheckSquare, AlertTriangle, Clock, TrendingUp, PieChart, BarChart3, Target,
-} from 'lucide-react'
 import Link from 'next/link'
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckSquare,
+  Clock,
+  Mail,
+  PieChart,
+  Target,
+  TrendingUp,
+} from 'lucide-react'
+
+import { PageHeader } from '@/components/page-header'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { useAuth } from '@/lib/use-auth'
+
+type DashboardTask = {
+  id: string
+  title: string
+  summary: string
+  status: string
+  priorityScore?: number | null
+  explicitDeadline?: string | null
+  inferredDeadline?: string | null
+  userSetDeadline?: string | null
+}
+
+type DashboardEmail = {
+  id: string
+  subject: string
+  sender?: string | null
+  classification?: string | null
+  taskLinks?: Array<unknown>
+}
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -39,36 +68,37 @@ export default function DashboardPage() {
 
   const s = stats?.data
   const confirmedTasks = confirmedRes?.data || []
-  const pendingTasks2 = pendingRes?.data || []
-  const allTasks = allTasksRes?.data || []
-  const allEmails: any[] = emailsRes?.data || []
+  const pendingTasks = pendingRes?.data || []
+  const allTasks: DashboardTask[] = allTasksRes?.data || []
+  const allEmails: DashboardEmail[] = emailsRes?.data || []
 
   const totalTasks = s?.tasks?.total || 0
   const completedTasks = s?.tasks?.completed || 0
   const pendingTaskCount = s?.tasks?.pending || 0
-  const confirmedTaskCount = allTasks.filter((t: any) => t.status === 'confirmed').length
-  const dismissedTaskCount = allTasks.filter((t: any) => t.status === 'dismissed').length
+  const confirmedTaskCount = allTasks.filter((t) => t.status === 'confirmed').length
+  const dismissedTaskCount = allTasks.filter((t) => t.status === 'dismissed').length
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
   const emailData = s?.emails || { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 }
 
-  // Emails that need attention: action/uncertain without linked tasks
-  const attentionEmails = allEmails.filter((e: any) =>
-    (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length > 0)
-  ).slice(0, 5)
+  const attentionEmails = allEmails
+    .filter((email) =>
+      (email.classification === 'action' || email.classification === 'uncertain') && !(email.taskLinks?.length > 0)
+    )
+    .slice(0, 5)
 
   const priorityCounts = { critical: 0, high: 0, medium: 0, low: 0 }
-  for (const t of allTasks) {
-    const band = getPriorityBand(t.priorityScore || 0)
+  for (const task of allTasks) {
+    const band = getPriorityBand(task.priorityScore || 0)
     priorityCounts[band as keyof typeof priorityCounts]++
   }
 
   const now = new Date()
   const weekFromNow = new Date(now.getTime() + 7 * 86400000)
-  const upcomingCount = allTasks.filter((t: any) => {
-    const dl = t.userSetDeadline || t.explicitDeadline || t.inferredDeadline
-    if (!dl) return false
-    const d = new Date(dl)
-    return d >= now && d <= weekFromNow && (t.status === 'pending' || t.status === 'confirmed')
+  const upcomingCount = allTasks.filter((task) => {
+    const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
+    if (!deadline) return false
+    const date = new Date(deadline)
+    return date >= now && date <= weekFromNow && (task.status === 'pending' || task.status === 'confirmed')
   }).length
 
   const actionToTask = emailData.action > 0
@@ -76,11 +106,26 @@ export default function DashboardPage() {
     : 0
 
   return (
-    <div className="animate-in fade-in space-y-6 duration-200">
-      {/* Need Attention banner — only shown when there are unlinked action emails */}
+    <div className="space-y-6">
+      <PageHeader
+        title={`Hi, ${user?.name?.split(' ')[0] || 'there'}`}
+        description="Your email-to-task command center."
+        actions={
+          s?.sync?.gmailConnected ? (
+            <Badge className="h-9 rounded-lg bg-green-100 px-4 text-sm font-medium text-green-700 hover:bg-green-100">
+              Connected
+            </Badge>
+          ) : (
+            <a href="/api/auth/google">
+              <Button size="sm">Connect Gmail</Button>
+            </a>
+          )
+        }
+      />
+
       {attentionEmails.length > 0 && (
-        <Link href="/dashboard/emails" className="block">
-          <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-gradient-to-r from-red-50 to-orange-50 px-4 py-3 shadow-sm hover:shadow-md transition-all">
+        <Link href="/dashboard/emails" className="animate-fade-in-up stagger-2 block">
+          <div className="flex items-center gap-3 rounded-2xl border border-red-200/80 bg-[linear-gradient(135deg,rgba(254,242,242,1)_0%,rgba(255,247,237,1)_100%)] px-4 py-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
             <div className="relative shrink-0">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-100">
                 <AlertTriangle className="h-4.5 w-4.5 text-red-600" />
@@ -95,40 +140,17 @@ export default function DashboardPage() {
               </p>
               <p className="truncate text-xs text-red-600">
                 {attentionEmails[0]?.subject}
-                {attentionEmails.length > 1 ? ` and ${attentionEmails.length - 1} more…` : ''}
+                {attentionEmails.length > 1 ? ` and ${attentionEmails.length - 1} more...` : ''}
               </p>
             </div>
-            <span className="shrink-0 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors">
+            <span className="shrink-0 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700">
               View
             </span>
           </div>
         </Link>
       )}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Hi, {user?.name?.split(' ')[0] || 'there'} 👋
-          </h1>
-          <p className="text-sm text-gray-500">Your email-to-task command center</p>
-        </div>
-
-        {s?.sync?.gmailConnected ? (
-          <span className="inline-flex items-center rounded-lg bg-green-100 px-4 py-2 text-sm font-medium text-green-700">
-            Connected
-          </span>
-        ) : (
-          <a
-            href="/api/auth/google"
-            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
-          >
-            Connect Gmail
-          </a>
-        )}
-      </div>
-
-      {/* Top stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="animate-fade-in-up stagger-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Emails Processed"
           value={emailData.total}
@@ -155,9 +177,8 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* KPI Charts row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card>
+      <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="border-gray-200/80 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <PieChart className="h-4 w-4 text-green-600" />
@@ -172,28 +193,16 @@ export default function DashboardPage() {
                 color={completionRate >= 70 ? '#22c55e' : completionRate >= 40 ? '#f59e0b' : '#ef4444'}
               />
               <div className="space-y-1.5 text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
-                  <span className="text-gray-600">Completed: {completedTasks}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  <span className="text-gray-600">Confirmed: {confirmedTaskCount}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full bg-purple-500" />
-                  <span className="text-gray-600">Pending: {pendingTaskCount}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full bg-gray-300" />
-                  <span className="text-gray-600">Dismissed: {dismissedTaskCount}</span>
-                </div>
+                <LegendDot color="bg-green-500" label={`Completed: ${completedTasks}`} />
+                <LegendDot color="bg-blue-500" label={`Confirmed: ${confirmedTaskCount}`} />
+                <LegendDot color="bg-purple-500" label={`Pending: ${pendingTaskCount}`} />
+                <LegendDot color="bg-gray-300" label={`Dismissed: ${dismissedTaskCount}`} />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-gray-200/80 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <BarChart3 className="h-4 w-4 text-blue-600" />
@@ -210,7 +219,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-gray-200/80 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <TrendingUp className="h-4 w-4 text-orange-500" />
@@ -227,18 +236,16 @@ export default function DashboardPage() {
             <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2">
               <Target className="h-3.5 w-3.5 text-blue-600" />
               <span className="text-xs text-blue-700">
-                AI extraction rate: <strong>{actionToTask}%</strong> of action emails → tasks
+                AI extraction rate: <strong>{actionToTask}%</strong> of action emails to tasks
               </span>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Attention row — tasks needing review + emails needing attention, side by side */}
-      {(pendingTasks2.length > 0 || attentionEmails.length > 0) && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* Tasks pending review */}
-          <Card className="border-purple-200 bg-gradient-to-br from-purple-50/40 to-white">
+      {(pendingTasks.length > 0 || attentionEmails.length > 0) && (
+        <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="border-purple-200/80 bg-[linear-gradient(180deg,rgba(250,245,255,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-sm">
@@ -246,19 +253,19 @@ export default function DashboardPage() {
                     <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
                   </div>
                   Tasks to Review
-                  {pendingTasks2.length > 0 && (
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">{pendingTasks2.length}</span>
+                  {pendingTasks.length > 0 && (
+                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">{pendingTasks.length}</span>
                   )}
                 </CardTitle>
                 <Link href="/dashboard/tasks" className="text-xs text-purple-600 hover:underline">View all</Link>
               </div>
             </CardHeader>
             <CardContent>
-              {pendingTasks2.length === 0 ? (
+              {pendingTasks.length === 0 ? (
                 <p className="py-4 text-center text-xs text-gray-400">All tasks reviewed</p>
               ) : (
                 <div className="space-y-1.5">
-                  {pendingTasks2.map((task: any) => {
+                  {pendingTasks.map((task: DashboardTask) => {
                     const band = getPriorityBand(task.priorityScore || 0)
                     return (
                       <Link
@@ -284,8 +291,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Emails needing attention */}
-          <Card className="border-red-200 bg-gradient-to-br from-red-50/40 to-white">
+          <Card className="border-red-200/80 bg-[linear-gradient(180deg,rgba(254,242,242,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-sm">
@@ -305,7 +311,7 @@ export default function DashboardPage() {
                 <p className="py-4 text-center text-xs text-gray-400">All caught up</p>
               ) : (
                 <div className="space-y-1.5">
-                  {attentionEmails.map((email: any) => (
+                  {attentionEmails.map((email: DashboardEmail) => (
                     <Link
                       key={email.id}
                       href={`/dashboard/emails/${email.id}`}
@@ -332,8 +338,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Confirmed tasks — top priority to work on */}
-      <Card>
+      <Card className="animate-fade-in-up stagger-6 border-gray-200/80 shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">Top Priority Tasks</CardTitle>
@@ -347,13 +352,13 @@ export default function DashboardPage() {
             </p>
           ) : (
             <div className="space-y-3">
-              {confirmedTasks.map((task: any) => {
+              {confirmedTasks.map((task: DashboardTask) => {
                 const band = getPriorityBand(task.priorityScore || 0)
                 return (
                   <Link
                     key={task.id}
                     href={`/dashboard/tasks/${task.id}`}
-                    className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-gray-50"
+                    className="flex items-center justify-between rounded-lg border border-gray-200/80 bg-white p-3 transition-colors hover:bg-gray-50"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-gray-900">{task.title}</p>
@@ -385,21 +390,36 @@ function DonutChart({ value, size, color }: { value: number; size: number; color
   const circ = 2 * Math.PI * r
   const filled = (value / 100) * circ
   const half = size / 2
+
   return (
     <svg width={size} height={size} className="shrink-0">
       <circle cx={half} cy={half} r={r} fill="none" stroke="#e5e7eb" strokeWidth={10} />
-      <circle cx={half} cy={half} r={r} fill="none" stroke={color} strokeWidth={10} strokeDasharray={`${filled} ${circ}`} strokeLinecap="round" transform={`rotate(-90 ${half} ${half})`} className="transition-all duration-700" />
-      <text x={half} y={half} textAnchor="middle" dominantBaseline="central" className="text-lg font-bold" fill="#1f2937">{value}%</text>
+      <circle
+        cx={half}
+        cy={half}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={10}
+        strokeDasharray={`${filled} ${circ}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${half} ${half})`}
+        className="transition-all duration-700"
+      />
+      <text x={half} y={half} textAnchor="middle" dominantBaseline="central" className="text-lg font-bold" fill="#1f2937">
+        {value}%
+      </text>
     </svg>
   )
 }
 
 function BarRow({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
   const pct = max > 0 ? (value / max) * 100 : 0
+
   return (
     <div className="flex items-center gap-3">
       <span className="w-20 text-xs text-gray-600">{label}</span>
-      <div className="flex-1 h-5 rounded-full bg-gray-100 overflow-hidden">
+      <div className="h-5 flex-1 overflow-hidden rounded-full bg-gray-100">
         <div className={`h-full rounded-full ${color} transition-all duration-500`} style={{ width: `${Math.max(pct, 2)}%` }} />
       </div>
       <span className="w-8 text-right text-xs font-semibold text-gray-700">{value}</span>
@@ -407,9 +427,18 @@ function BarRow({ label, value, max, color }: { label: string; value: number; ma
   )
 }
 
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`h-2.5 w-2.5 rounded-full ${color}`} />
+      <span className="text-gray-600">{label}</span>
+    </div>
+  )
+}
+
 function StatCard({ title, value, icon, detail }: { title: string; value: string | number; icon: React.ReactNode; detail: string }) {
   return (
-    <Card>
+    <Card className="border-gray-200/80 shadow-sm transition-transform duration-200 hover:-translate-y-0.5">
       <CardContent className="pt-4 pb-4">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-gray-500">{title}</p>
@@ -431,3 +460,4 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
+

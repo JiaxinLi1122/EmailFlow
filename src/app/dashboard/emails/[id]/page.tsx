@@ -5,8 +5,21 @@ import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import {
-  ArrowLeft, Mail, Paperclip, Clock, User, ArrowUpRight,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { PageHeader } from '@/components/page-header'
+import { StatePanel } from '@/components/state-panel'
+import {
+  ArrowLeft, Mail, Paperclip, Clock, ArrowUpRight,
   CheckSquare, AlertTriangle, Eye, Trash2, Sparkles, Shield, Plus, Tag, X,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -20,6 +33,16 @@ const classConfig: Record<string, { label: string; color: string; bg: string; ic
   awareness: { label: 'Awareness / FYI', color: 'bg-blue-50 text-blue-700 border-blue-200', bg: 'from-blue-50/50 to-white', icon: Eye },
   ignore: { label: 'Low Priority', color: 'bg-gray-50 text-gray-500 border-gray-200', bg: 'from-gray-50/50 to-white', icon: Trash2 },
   uncertain: { label: 'Needs Review', color: 'bg-yellow-50 text-yellow-700 border-yellow-200', bg: 'from-yellow-50/50 to-white', icon: AlertTriangle },
+}
+
+type EmailTaskLink = {
+  id: string
+  task: {
+    id: string
+    title: string
+    status: string
+    priorityScore?: number | null
+  }
 }
 
 export default function EmailDetailPage() {
@@ -55,7 +78,7 @@ export default function EmailDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['emails'] })
         toast.success(`Marked as ${classConfig[newClass]?.label || newClass}`)
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to update classification')
     } finally {
       setClassifying(false)
@@ -74,7 +97,7 @@ export default function EmailDetailPage() {
       } else {
         toast.error('Failed to unlink task')
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to unlink task')
     } finally {
       setUnlinkingTaskId(null)
@@ -101,7 +124,7 @@ export default function EmailDetailPage() {
       })
 
       if (res.ok) {
-        const data = await res.json()
+        await res.json()
         queryClient.invalidateQueries({ queryKey: ['email', emailId] })
         queryClient.invalidateQueries({ queryKey: ['tasks'] })
         toast.success('Task created')
@@ -112,7 +135,7 @@ export default function EmailDetailPage() {
       } else {
         toast.error('Failed to create task')
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to create task')
     } finally {
       setCreatingTask(false)
@@ -121,27 +144,32 @@ export default function EmailDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="animate-in fade-in mx-auto max-w-4xl space-y-4">
-        <div className="h-8 w-32 animate-pulse rounded bg-gray-200" />
-        <div className="h-64 animate-pulse rounded-xl border bg-gray-100" />
-        <div className="h-40 animate-pulse rounded-xl border bg-gray-100" />
-      </div>
+      <StatePanel
+        loading
+        title="Loading email"
+        description="Pulling the latest message details, linked tasks, and AI analysis."
+      />
     )
   }
 
   if (!email) {
     return (
-      <div className="mx-auto max-w-4xl">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/emails')} className="gap-2 text-gray-500 mb-4">
-          <ArrowLeft className="h-4 w-4" />
-          Back to inbox
-        </Button>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Mail className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-            <p className="text-gray-400">Email not found.</p>
-          </CardContent>
-        </Card>
+      <div className="space-y-4">
+        <PageHeader
+          title="Email unavailable"
+          description="We couldn't find this message in the current workspace."
+          actions={(
+            <Button variant="outline" onClick={() => router.push('/dashboard/emails')} className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to inbox
+            </Button>
+          )}
+        />
+        <StatePanel
+          icon={<Mail className="h-5 w-5 text-gray-400" />}
+          title="Email not found"
+          description="It may have been removed, or the current account no longer has access to it."
+        />
       </div>
     )
   }
@@ -153,22 +181,31 @@ export default function EmailDetailPage() {
   const senderInitial = (senderName || 'U')[0].toUpperCase()
 
   return (
-    <div className="animate-in fade-in duration-200">
-      {/* Two-column layout */}
+    <div className="animate-in fade-in space-y-5 duration-200">
+      <PageHeader
+        title={email.subject}
+        description="Review the message, linked work, and AI classification in one place."
+        meta={`From ${senderName || senderEmail} • ${new Date(email.receivedAt).toLocaleString('en', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })}`}
+        actions={(
+          <Button variant="outline" onClick={() => router.push('/dashboard/emails')} className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back to inbox
+          </Button>
+        )}
+      />
+
       <div className="mx-auto max-w-6xl space-y-5">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/emails')} className="gap-2 text-gray-500 hover:text-gray-900 -ml-2">
-          <ArrowLeft className="h-4 w-4" />
-          Back to inbox
-        </Button>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Email content */}
         <div className="lg:col-span-2 space-y-4">
           {/* Header card */}
-          <Card className={`bg-gradient-to-br ${cls.bg} overflow-hidden`}>
+          <Card className={`animate-fade-in-up stagger-2 overflow-hidden border-white/70 bg-gradient-to-br ${cls.bg} shadow-sm`}>
             <CardContent className="py-5 space-y-4">
-              {/* Subject */}
-              <h1 className="text-xl font-bold text-gray-900 leading-snug">{email.subject}</h1>
-
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={`gap-1 ${cls.color}`}>
@@ -215,7 +252,7 @@ export default function EmailDetailPage() {
           </Card>
 
           {/* Email body */}
-          <Card>
+          <Card className="animate-fade-in-up stagger-3 border-white/70 bg-white/95 shadow-sm">
             <CardContent className="py-5">
               <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
                 {email.bodyFull || email.bodyPreview}
@@ -228,7 +265,7 @@ export default function EmailDetailPage() {
         <div className="space-y-4">
           {/* AI Analysis */}
           {email.classReasoning && (
-            <Card className="border-yellow-200 bg-gradient-to-br from-yellow-50/50 to-white">
+            <Card className="animate-fade-in-up stagger-4 border-yellow-200 bg-gradient-to-br from-yellow-50/50 to-white shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="h-4 w-4 text-yellow-600" />
@@ -243,7 +280,7 @@ export default function EmailDetailPage() {
 
           {/* Linked Tasks */}
           {email.taskLinks?.length > 0 && (
-            <Card>
+            <Card className="animate-fade-in-up stagger-5 border-white/70 bg-white/95 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -252,7 +289,7 @@ export default function EmailDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {email.taskLinks.map((link: any) => {
+                {(email.taskLinks as EmailTaskLink[]).map((link) => {
                   const band = getPriorityBand(link.task.priorityScore || 0)
                   const isDone = link.task.status === 'completed' || link.task.status === 'dismissed'
                   const isUnlinking = unlinkingTaskId === link.task.id
@@ -310,7 +347,7 @@ export default function EmailDetailPage() {
           )}
 
           {/* Email metadata */}
-          <Card>
+          <Card className="animate-fade-in-up stagger-6 border-white/70 bg-white/95 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Shield className="h-4 w-4 text-gray-400" />
@@ -348,7 +385,7 @@ export default function EmailDetailPage() {
           </Card>
 
           {/* Reclassify */}
-          <Card>
+          <Card className="animate-fade-in-up stagger-7 border-white/70 bg-white/95 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Tag className="h-4 w-4 text-blue-600" />
@@ -373,7 +410,7 @@ export default function EmailDetailPage() {
           </Card>
 
           {/* Quick Actions */}
-          <Card>
+          <Card className="animate-fade-in-up stagger-8 border-white/70 bg-white/95 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Plus className="h-4 w-4 text-blue-600" />
@@ -396,75 +433,61 @@ export default function EmailDetailPage() {
       </div>
 
       {/* Create Task Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Create Task from Email</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Title */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Task Title *</label>
-                <input
-                  type="text"
-                  value={taskTitle}
-                  onChange={(e) => setTaskTitle(e.target.value)}
-                  placeholder="Enter task title"
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-6 pt-6">
+            <DialogTitle>Create Task from Email</DialogTitle>
+            <DialogDescription>
+              Start a task from this message and keep the link back to the source email.
+            </DialogDescription>
+          </DialogHeader>
 
-              {/* Summary */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Summary</label>
-                <textarea
-                  value={taskSummary}
-                  onChange={(e) => setTaskSummary(e.target.value)}
-                  placeholder="Enter task summary (optional)"
-                  rows={3}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+          <div className="space-y-4 px-6 py-5">
+            <div className="space-y-2">
+              <Label htmlFor="email-task-title">Task Title</Label>
+              <Input
+                id="email-task-title"
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                placeholder="Enter task title"
+              />
+            </div>
 
-              {/* Linked Emails */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Link Emails</label>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {/* Current email is always linked */}
-                  <div className="flex items-center gap-2 rounded-lg border bg-blue-50 p-2">
-                    <input
-                      type="checkbox"
-                      checked={true}
-                      disabled
-                      className="rounded"
-                    />
-                    <span className="text-sm text-gray-700 flex-1 truncate">{email.subject}</span>
-                    <span className="text-xs text-gray-500">Current</span>
+            <div className="space-y-2">
+              <Label htmlFor="email-task-summary">Summary</Label>
+              <Textarea
+                id="email-task-summary"
+                value={taskSummary}
+                onChange={(e) => setTaskSummary(e.target.value)}
+                placeholder="Add a short task summary"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Linked Emails</Label>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-5 w-5 items-center justify-center rounded border border-blue-200 bg-white">
+                    <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
                   </div>
+                  <span className="flex-1 truncate text-sm text-gray-700">{email.subject}</span>
+                  <span className="text-xs font-medium text-blue-600">Current email</span>
                 </div>
               </div>
+            </div>
+          </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateTask}
-                  disabled={creatingTask || !taskTitle.trim()}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
-                >
-                  {creatingTask ? 'Creating...' : 'Create Task'}
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateTask} disabled={creatingTask || !taskTitle.trim()}>
+              {creatingTask ? 'Creating...' : 'Create Task'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
