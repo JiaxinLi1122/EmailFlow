@@ -26,7 +26,8 @@ export async function POST(req: Request) {
     })
 
     return success({ syncStartDate: startDate })
-  } catch (err: any) {
-    return error('UPDATE_FAILED', err.message, 500)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update sync range'
+    return error('UPDATE_FAILED', message, 500)
   }
 }

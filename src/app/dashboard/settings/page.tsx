@@ -38,6 +38,7 @@ export default function SettingsPage() {
   const queryClient = useQueryClient()
   const [syncPickerOpen, setSyncPickerOpen] = useState(false)
   const [pendingDate, setPendingDate] = useState<Date | undefined>()
+  const [todayMs] = useState(() => Date.now())
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -131,7 +132,7 @@ export default function SettingsPage() {
 
   const isBusy = disconnectMutation.isPending || syncRangeMutation.isPending
   const pendingDays = pendingDate
-    ? Math.max(1, Math.round((Date.now() - pendingDate.getTime()) / 86400000))
+    ? Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
     : null
 
   return (
@@ -289,7 +290,7 @@ export default function SettingsPage() {
                   selected={pendingDate}
                   onSelect={setPendingDate}
                   captionLayout="dropdown"
-                  disabled={(date) => date > new Date() || date < new Date(Date.now() - 365 * 86400000)}
+                  disabled={(date) => date > new Date(todayMs) || date < new Date(todayMs - 365 * 86400000)}
                 />
                 <div className="border-t border-gray-100 bg-blue-50/40 px-4 py-3">
                   <p className="text-xs font-medium text-blue-900">
@@ -320,7 +321,7 @@ export default function SettingsPage() {
                     disabled={!pendingDate || syncRangeMutation.isPending}
                     onClick={() => {
                       if (!pendingDate) return
-                      const days = Math.max(1, Math.round((Date.now() - pendingDate.getTime()) / 86400000))
+                      const days = Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
                       syncRangeMutation.mutate(days, {
                         onSettled: () => {
                           setSyncPickerOpen(false)

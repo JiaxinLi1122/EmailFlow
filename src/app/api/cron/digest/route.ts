@@ -34,9 +34,10 @@ export async function GET(req: NextRequest) {
     try {
       await createDailyDigest(user.id)
       results.push({ userId: user.id, status: 'ok' })
-    } catch (err: any) {
-      console.error(`[cron/digest] Failed for user ${user.id}:`, err.message)
-      results.push({ userId: user.id, status: 'error', error: err.message })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown digest failure'
+      console.error(`[cron/digest] Failed for user ${user.id}:`, message)
+      results.push({ userId: user.id, status: 'error', error: message })
     }
   }
 

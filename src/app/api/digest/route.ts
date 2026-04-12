@@ -45,8 +45,9 @@ export async function POST(req: NextRequest) {
       : await createDailyDigest(user.id)
 
     return success(digest)
-  } catch (err: any) {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to generate digest'
     console.error('[api/digest POST]', err)
-    return error('DIGEST_FAILED', err.message || 'Failed to generate digest', 500)
+    return error('DIGEST_FAILED', message, 500)
   }
 }

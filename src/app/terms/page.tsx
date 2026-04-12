@@ -27,8 +27,8 @@ export default function TermsPage() {
 
           <section>
             <p>
-              These Terms of Service ("Terms") govern your use of EmailFlow AI, a product of{' '}
-              <strong>Vaxon</strong> ("we", "us", or "our"). By creating an account or using our
+              These Terms of Service (&quot;Terms&quot;) govern your use of EmailFlow AI, a product of{' '}
+              <strong>Vaxon</strong> (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;). By creating an account or using our
               service, you agree to these Terms. If you do not agree, please do not use EmailFlow AI.
             </p>
           </section>
@@ -71,7 +71,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-base font-semibold text-gray-900 mb-3">4. Beta and availability</h2>
             <p>
-              EmailFlow AI is currently in early access (MVP/Beta). The service is provided "as is"
+              EmailFlow AI is currently in early access (MVP/Beta). The service is provided &quot;as is&quot;
               and may change, be unavailable, or contain bugs. We do not guarantee uptime or
               uninterrupted access during this phase.
             </p>
@@ -137,10 +137,11 @@ export default function TermsPage() {
         </div>
 
         <div className="mt-12 border-t pt-6 flex items-center justify-between text-xs text-gray-400">
-          <span>© {new Date().getFullYear()} Vaxon. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} Vaxon. All rights reserved.</span>
           <Link href="/privacy" className="text-blue-600 hover:underline">Privacy Policy</Link>
         </div>
       </div>
     </div>
   )
 }
+

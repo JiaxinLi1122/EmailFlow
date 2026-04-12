@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { EmailMessage } from '@/integrations'
 
@@ -59,7 +60,7 @@ export async function markClassificationFailed(emailId: string) {
     data: {
       classification: 'uncertain',
       classConfidence: 0,
-      classReasoning: 'Classification failed — needs manual review',
+      classReasoning: 'Classification failed - needs manual review',
       processedAt: new Date(),
     },
   })
@@ -84,7 +85,7 @@ export async function findEmailsPaginated(
   userId: string,
   options: { page: number; limit: number; classification?: string }
 ) {
-  const where: any = { userId }
+  const where: Prisma.EmailWhereInput = { userId }
   if (options.classification) where.classification = options.classification
 
   const [emails, total] = await Promise.all([
@@ -115,3 +116,4 @@ export async function findEmailById(userId: string, emailId: string) {
     },
   })
 }
+

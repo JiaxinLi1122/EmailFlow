@@ -2,9 +2,11 @@
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import Link from 'next/link'
+import { MonthYearPanel } from '@/components/month-year-panel'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react'
 import { getPriorityBand } from '@/types'
 import { toast } from 'sonner'
 
@@ -13,20 +15,41 @@ const COL_WIDTH = 48
 const ROW_HEIGHT = 60
 const LABEL_WIDTH = 240
 const HANDLE_WIDTH = 10
-const MONTH_OPTIONS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-]
+const TIMELINE_ORDER_STORAGE_KEY = 'emailflow-ai:timeline-order'
+
+type TimelineTask = {
+  id: string
+  title: string
+  status: 'pending' | 'confirmed' | 'completed' | 'dismissed'
+  priorityScore?: number | null
+  startDate?: string | null
+  explicitDeadline?: string | null
+  inferredDeadline?: string | null
+  userSetDeadline?: string | null
+}
+
+type UpdateTaskMutation = {
+  mutate: (
+    vars: { id: string; data: { startDate?: string; userSetDeadline?: string } },
+    options?: { onSuccess?: () => void; onError?: () => void }
+  ) => void
+}
+
+type DragState = {
+  taskId: string
+  mode: 'move' | 'resize-left' | 'resize-right'
+  origStart: Date
+  origEnd: Date
+  startX: number
+}
+
+type DragSnapshot = Omit<DragState, 'startX'> & { delta: number }
+
+type PendingPosition = {
+  taskId: string
+  start: Date
+  end: Date
+}
 
 function toDateStr(d: Date) {
   const y = d.getFullYear()
@@ -39,19 +62,34 @@ function formatShort(d: Date) {
 }
 function startOfDay(d: Date) { const r = new Date(d); r.setHours(0, 0, 0, 0); return r }
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r }
+function startOfWeek(d: Date) {
+  const r = startOfDay(d)
+  r.setDate(r.getDate() - r.getDay())
+  return r
+}
 function diffDays(a: Date, b: Date) {
   const aNoon = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 12)
   const bNoon = new Date(b.getFullYear(), b.getMonth(), b.getDate(), 12)
   return Math.round((aNoon.getTime() - bNoon.getTime()) / DAY_MS)
 }
 
-function getTaskStart(task: any): Date | null {
+function intersectsRange(
+  start: Date | null,
+  end: Date | null,
+  rangeStart: Date,
+  rangeEnd: Date
+) {
+  if (!start || !end) return false
+  return start <= rangeEnd && end >= rangeStart
+}
+
+function getTaskStart(task: TimelineTask): Date | null {
   if (task.startDate) return startOfDay(new Date(task.startDate))
   const end = getTaskEnd(task)
   if (end) return addDays(end, -2)
   return null
 }
-function getTaskEnd(task: any): Date | null {
+function getTaskEnd(task: TimelineTask): Date | null {
   const raw = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   return raw ? startOfDay(new Date(raw)) : null
 }
@@ -63,15 +101,34 @@ const BAND_COLORS: Record<string, { bar: string; border: string; text: string }>
   low:      { bar: 'bg-gray-300',   border: 'border-gray-400',   text: 'text-gray-700' },
 }
 
-interface Props { tasks: any[]; updateTask: any; sortBy?: string }
+interface Props {
+  tasks: TimelineTask[]
+  updateTask: UpdateTaskMutation
+}
 
-export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props) {
+export function GanttTimeline({ tasks, updateTask }: Props) {
   const today = useMemo(() => startOfDay(new Date()), [])
   const [rangeStart, setRangeStart] = useState(() => addDays(today, -3))
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerMonth, setPickerMonth] = useState(() => startOfDay(new Date()))
+  const [transitionStage, setTransitionStage] = useState<'idle' | 'out' | 'in'>('idle')
+  const [manualOrderIds, setManualOrderIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+
+    try {
+      const raw = window.localStorage.getItem(TIMELINE_ORDER_STORAGE_KEY)
+      if (!raw) return []
+
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
+  const [dropTargetTaskId, setDropTargetTaskId] = useState<string | null>(null)
   const totalDays = 21
-  const rangeYear = rangeStart.getFullYear()
-  const rangeMonth = rangeStart.getMonth()
-  const yearOptions = Array.from({ length: 9 }, (_, index) => rangeYear - 4 + index)
+  const transitionTimeoutRef = useRef<number | null>(null)
 
   const days = useMemo(() => {
     const arr: Date[] = []
@@ -80,41 +137,66 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
   }, [rangeStart, totalDays])
 
   // Sort tasks by due date ascending (no date → bottom)
+  const visibleTasks = useMemo(() => {
+    const rangeEnd = addDays(rangeStart, totalDays - 1)
+
+    return tasks.filter((task) => {
+      const taskStart = getTaskStart(task)
+      const taskEnd = getTaskEnd(task)
+      return intersectsRange(taskStart, taskEnd, rangeStart, rangeEnd)
+    })
+  }, [tasks, rangeStart, totalDays])
+
+  const taskOrderLookup = useMemo(() => {
+    const map = new Map<string, number>()
+    manualOrderIds.forEach((id, index) => {
+      map.set(id, index)
+    })
+    return map
+  }, [manualOrderIds])
+
+  const visibleTaskLookup = useMemo(() => {
+    const map = new Map<string, TimelineTask>()
+    visibleTasks.forEach((task) => {
+      map.set(task.id, task)
+    })
+    return map
+  }, [visibleTasks])
+
   const sortedTasks = useMemo(() => {
-    return [...tasks].sort((a, b) => {
-      if (sortBy === 'deadline') {
-        const aEnd = getTaskEnd(a)
-        const bEnd = getTaskEnd(b)
-        if (!aEnd && !bEnd) return a.id < b.id ? -1 : 1
-        if (!aEnd) return 1
-        if (!bEnd) return -1
-        const dateDiff = aEnd.getTime() - bEnd.getTime()
-        if (dateDiff !== 0) return dateDiff
-        return a.id < b.id ? -1 : 1  // same deadline → stable by id
+    return [...visibleTasks].sort((a, b) => {
+      const aCompleted = a.status === 'completed'
+      const bCompleted = b.status === 'completed'
+
+      if (aCompleted !== bCompleted) {
+        return aCompleted ? 1 : -1
       }
-      // Default: by priority (higher score = higher priority = top)
-      // Secondary sort by id (stable cuid) so tasks with equal score never swap on refetch
+
+      const aManual = taskOrderLookup.get(a.id)
+      const bManual = taskOrderLookup.get(b.id)
+      if (aManual !== undefined || bManual !== undefined) {
+        if (aManual === undefined) return 1
+        if (bManual === undefined) return -1
+        if (aManual !== bManual) return aManual - bManual
+      }
+      // Default timeline order: priority first unless the user has manually reordered tasks.
       const scoreDiff = (b.priorityScore || 0) - (a.priorityScore || 0)
       if (scoreDiff !== 0) return scoreDiff
       return a.id < b.id ? -1 : 1
     })
-  }, [tasks, sortBy])
+  }, [visibleTasks, taskOrderLookup])
 
   // Drag state
-  const dragRef = useRef<{
-    taskId: string
-    mode: 'move' | 'resize-left' | 'resize-right'
-    origStart: Date
-    origEnd: Date
-    startX: number
-  } | null>(null)
+  const dragRef = useRef<DragState | null>(null)
   const deltaRef = useRef(0)
   const [, forceRender] = useState(0)
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+  const [dragSnapshot, setDragSnapshot] = useState<DragSnapshot | null>(null)
 
   // Pending override: holds final position after mouseup until React Query data arrives
   // Prevents the visual snap-back between mutation start and data refresh
-  const pendingRef = useRef<{ taskId: string; start: Date; end: Date } | null>(null)
+  const pendingRef = useRef<PendingPosition | null>(null)
+  const [pendingSnapshot, setPendingSnapshot] = useState<PendingPosition | null>(null)
 
   const startDrag = useCallback(
     (e: React.MouseEvent, taskId: string, mode: 'move' | 'resize-left' | 'resize-right', origStart: Date, origEnd: Date) => {
@@ -122,6 +204,7 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
       e.stopPropagation()
       dragRef.current = { taskId, mode, origStart, origEnd, startX: e.clientX }
       deltaRef.current = 0
+      setDragSnapshot({ taskId, mode, origStart, origEnd, delta: 0 })
       forceRender((n) => n + 1)
     }, []
   )
@@ -133,6 +216,13 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
       const newDelta = Math.round(dx / COL_WIDTH)
       if (newDelta !== deltaRef.current) {
         deltaRef.current = newDelta
+        setDragSnapshot({
+          taskId: dragRef.current.taskId,
+          mode: dragRef.current.mode,
+          origStart: dragRef.current.origStart,
+          origEnd: dragRef.current.origEnd,
+          delta: newDelta,
+        })
         forceRender((n) => n + 1)
       }
     }
@@ -144,6 +234,7 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
       if (!drag) {
         dragRef.current = null
         deltaRef.current = 0
+        setDragSnapshot(null)
         forceRender((n) => n + 1)
         return
       }
@@ -165,10 +256,12 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
 
         // Lock the bar at the dropped position immediately so there's no snap-back
         pendingRef.current = { taskId: drag.taskId, start: newStart, end: newEnd }
+        setPendingSnapshot({ taskId: drag.taskId, start: newStart, end: newEnd })
       }
 
       dragRef.current = null
       deltaRef.current = 0
+      setDragSnapshot(null)
       forceRender((n) => n + 1)
 
       if (delta !== 0) {
@@ -182,6 +275,7 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
             },
             onError: () => {
               pendingRef.current = null
+              setPendingSnapshot(null)
               forceRender((n) => n + 1)
               toast.error('Failed to update timeline')
             },
@@ -200,12 +294,12 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
 
   // Bar position — priority: live drag > pending override > task data
   const getBarStyle = useCallback(
-    (task: any) => {
+    (task: TimelineTask, activeDrag: DragSnapshot | null, activePending: PendingPosition | null) => {
       let taskStart: Date | null
       let taskEnd: Date | null
 
-      const drag = dragRef.current
-      const delta = deltaRef.current
+      const drag = activeDrag
+      const delta = activeDrag?.delta ?? 0
 
       if (drag && drag.taskId === task.id && delta !== 0) {
         // Live drag in progress
@@ -221,8 +315,8 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
           taskEnd = addDays(drag.origEnd, delta)
           if (taskEnd <= taskStart) taskEnd = addDays(taskStart, 1)
         }
-      } else if (pendingRef.current?.taskId === task.id && pendingRef.current) {
-        const pending = pendingRef.current
+      } else if (activePending?.taskId === task.id) {
+        const pending = activePending
         const liveEnd = getTaskEnd(task)
         const liveStart = getTaskStart(task)
         // If task data has caught up to the pending position, clear and use real data
@@ -231,7 +325,6 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
           toDateStr(liveEnd) === toDateStr(pending.end) &&
           toDateStr(liveStart) === toDateStr(pending.start)
         ) {
-          pendingRef.current = null
           taskStart = liveStart
           taskEnd = liveEnd
         } else {
@@ -258,53 +351,153 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
   const todayOffset = diffDays(today, rangeStart) * COL_WIDTH
   const gridWidth = totalDays * COL_WIDTH
   const rangeEnd = addDays(rangeStart, totalDays - 1)
-  const rangeLabel = `${formatShort(rangeStart)} — ${formatShort(rangeEnd)}, ${rangeEnd.getFullYear()}`
+  const rangeLabel = `${formatShort(rangeStart)} - ${formatShort(rangeEnd)}, ${rangeEnd.getFullYear()}`
+
+  const weekOptions = useMemo(() => {
+    const monthStart = new Date(pickerMonth.getFullYear(), pickerMonth.getMonth(), 1)
+    const monthEnd = new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() + 1, 0)
+    const weeks: Date[] = []
+    let cursor = startOfWeek(monthStart)
+
+    while (cursor <= monthEnd || weeks.length < 5) {
+      weeks.push(new Date(cursor))
+      cursor = addDays(cursor, 7)
+      if (weeks.length > 6) {
+        break
+      }
+    }
+
+    return weeks
+  }, [pickerMonth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(TIMELINE_ORDER_STORAGE_KEY, JSON.stringify(manualOrderIds))
+  }, [manualOrderIds])
+
+  const transitionToRange = useCallback((nextStart: Date) => {
+    if (transitionTimeoutRef.current) {
+      window.clearTimeout(transitionTimeoutRef.current)
+    }
+
+    setTransitionStage('out')
+    transitionTimeoutRef.current = window.setTimeout(() => {
+      setRangeStart(startOfDay(nextStart))
+      setTransitionStage('in')
+      transitionTimeoutRef.current = window.setTimeout(() => {
+        setTransitionStage('idle')
+        transitionTimeoutRef.current = null
+      }, 200)
+    }, 140)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimeoutRef.current) {
+        window.clearTimeout(transitionTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const reorderTasks = useCallback((sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return
+
+    const visibleIds = sortedTasks.map((task) => task.id)
+    const sourceIndex = visibleIds.indexOf(sourceId)
+    const targetIndex = visibleIds.indexOf(targetId)
+
+    if (sourceIndex === -1 || targetIndex === -1) return
+
+    const nextVisible = [...visibleIds]
+    const [moved] = nextVisible.splice(sourceIndex, 1)
+    nextVisible.splice(targetIndex, 0, moved)
+
+    const visibleSet = new Set(visibleIds)
+    const existing = manualOrderIds.filter((id) => !visibleSet.has(id))
+    setManualOrderIds([...nextVisible, ...existing])
+  }, [manualOrderIds, sortedTasks])
 
   return (
     <Card className="border-gray-200/80 bg-white/95 shadow-sm">
       <CardContent className="min-w-0 overflow-hidden py-4">
         {/* Controls */}
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setRangeStart((d) => addDays(d, -7))}>
+        <div className="mb-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="flex items-center gap-2 justify-self-start">
+            <Button variant="ghost" size="sm" onClick={() => transitionToRange(addDays(rangeStart, -7))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setRangeStart(addDays(today, -3))} className="text-xs">
+            <Button variant="outline" size="sm" onClick={() => transitionToRange(addDays(today, -3))} className="text-xs">
               Today
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setRangeStart((d) => addDays(d, 7))}>
+            <Button variant="ghost" size="sm" onClick={() => transitionToRange(addDays(rangeStart, 7))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="Select timeline year"
-              value={rangeYear}
-              onChange={(e) => setRangeStart(new Date(Number(e.target.value), rangeMonth, 1))}
-              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
-            >
-              {yearOptions.map((optionYear) => (
-                <option key={optionYear} value={optionYear}>
-                  {optionYear}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Select timeline month"
-              value={rangeMonth}
-              onChange={(e) => setRangeStart(new Date(rangeYear, Number(e.target.value), 1))}
-              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
-            >
-              {MONTH_OPTIONS.map((monthName, index) => (
-                <option key={monthName} value={index}>
-                  {monthName}
-                </option>
-              ))}
-            </select>
-            <span className="hidden text-xs text-gray-400 lg:inline">{rangeLabel}</span>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger className="justify-self-center rounded-lg px-3 py-1.5 text-sm font-semibold text-gray-900 transition-colors hover:bg-blue-50 hover:text-blue-800">
+              {rangeLabel}
+            </PopoverTrigger>
+            <PopoverContent align="center" className="w-[320px] rounded-2xl border border-gray-200 bg-white p-3 shadow-lg">
+              <div className="space-y-3">
+                <MonthYearPanel
+                  value={pickerMonth}
+                  onChange={(date) => setPickerMonth(date)}
+                />
+                <div className="space-y-2 border-t border-gray-100 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">
+                    Weeks In {pickerMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })}
+                  </p>
+                  <div className="space-y-2">
+                    {weekOptions.map((weekStart) => {
+                      const weekEnd = addDays(weekStart, 6)
+                      const active = rangeStart.toDateString() === weekStart.toDateString()
+
+                      return (
+                        <button
+                          key={weekStart.toISOString()}
+                          type="button"
+                          onClick={() => {
+                            transitionToRange(weekStart)
+                            setPickerOpen(false)
+                          }}
+                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
+                            active
+                              ? 'border-blue-300 bg-blue-100 text-blue-900'
+                              : 'border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800'
+                          }`}
+                        >
+                          <span className="font-medium">Week of {formatShort(weekStart)}</span>
+                          <span className="text-xs opacity-80">{formatShort(weekEnd)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <div className="justify-self-end text-right">
+            <span className="text-xs text-gray-400">21-day range</span>
           </div>
         </div>
 
+        <div
+          className={`transition-all duration-300 ease-out ${
+            transitionStage === 'out'
+              ? 'translate-y-1.5 scale-[0.992] opacity-0 blur-[1px]'
+              : transitionStage === 'in'
+                ? 'translate-y-0 scale-[1.005] opacity-100 blur-0'
+                : 'translate-y-0 scale-100 opacity-100 blur-0'
+          }`}
+        >
+        {sortedTasks.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 px-4 py-10 text-center">
+            <p className="text-sm font-medium text-gray-700">No active tasks in this timeline window</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Try a different week, or switch back to list or calendar to see tasks outside this range.
+            </p>
+          </div>
+        ) : (
         <div className="max-w-full overflow-x-auto pb-1">
           <div style={{ minWidth: LABEL_WIDTH + gridWidth }} className="select-none">
             {/* Day headers */}
@@ -333,31 +526,87 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
             </div>
 
             {/* Task rows */}
-            {sortedTasks.map((task: any) => {
+            {sortedTasks.map((task: TimelineTask) => {
               const band = getPriorityBand(task.priorityScore || 0)
               const colors = BAND_COLORS[band] || BAND_COLORS.low
-              const barStyle = getBarStyle(task)
-              const isDragging = dragRef.current?.taskId === task.id
+              const barStyle = getBarStyle(task, dragSnapshot, pendingSnapshot)
+              const isDragging = dragSnapshot?.taskId === task.id
               const isHovered = hoveredTaskId === task.id
               const origStart = getTaskStart(task)
               const origEnd = getTaskEnd(task)
+              const isCompleted = task.status === 'completed'
 
               return (
                 <div
                   key={task.id}
-                  className={`flex border-b transition-colors ${isDragging ? 'bg-blue-50/50' : 'hover:bg-gray-50/50'}`}
+                  className={`flex border-b transition-colors ${
+                    isCompleted
+                      ? 'bg-gray-50/70 opacity-70'
+                      : dropTargetTaskId === task.id && draggedTaskId !== task.id
+                        ? 'bg-blue-50/80'
+                      : isDragging
+                        ? 'bg-blue-50/50'
+                        : 'hover:bg-gray-50/50'
+                  }`}
                   style={{ height: ROW_HEIGHT }}
+                  onDragOver={(e) => {
+                    if (!draggedTaskId || draggedTaskId === task.id) return
+                    e.preventDefault()
+                    setDropTargetTaskId(task.id)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const sourceId = e.dataTransfer.getData('text/timeline-order')
+                    if (sourceId) {
+                      const sourceTask = visibleTaskLookup.get(sourceId)
+                      const targetTask = visibleTaskLookup.get(task.id)
+
+                      if (sourceTask?.status === 'completed' && targetTask?.status !== 'completed') {
+                        toast.warning('Completed tasks stay in the completed section')
+                      } else {
+                        reorderTasks(sourceId, task.id)
+                        toast.success('Timeline order updated')
+                      }
+                    }
+                    setDraggedTaskId(null)
+                    setDropTargetTaskId(null)
+                  }}
                 >
                   {/* Label — two lines: title + due date */}
                   <div
                     style={{ width: LABEL_WIDTH }}
-                    className="shrink-0 border-r flex items-center px-3 gap-2 bg-white z-20 relative"
+                    className={`shrink-0 border-r flex items-center px-3 gap-2 z-20 relative ${
+                      isCompleted ? 'bg-gray-50/80' : 'bg-white'
+                    }`}
                   >
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = 'move'
+                        e.dataTransfer.setData('text/timeline-order', task.id)
+                        setDraggedTaskId(task.id)
+                      }}
+                      onDragEnd={() => {
+                        setDraggedTaskId(null)
+                        setDropTargetTaskId(null)
+                      }}
+                      className={`shrink-0 rounded-md p-1 text-gray-300 transition-colors ${
+                        isCompleted ? 'cursor-grab text-gray-300/80' : 'cursor-grab hover:bg-blue-50 hover:text-blue-500'
+                      }`}
+                      title="Drag to reorder tasks"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </button>
                     <div className={`h-2.5 w-2.5 shrink-0 rounded-full ${colors.bar}`} />
                     <div className="min-w-0 flex-1">
                       <Link
                         href={`/dashboard/tasks/${task.id}`}
-                        className="block text-xs font-medium text-gray-800 hover:text-blue-600 leading-tight line-clamp-2"
+                        className={`block text-xs font-medium leading-tight line-clamp-2 ${
+                          isCompleted
+                            ? 'text-gray-500 line-through'
+                            : 'text-gray-800 hover:text-blue-600'
+                        }`}
                         title={task.title}
                       >
                         {task.title}
@@ -392,7 +641,11 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
                     {barStyle && origStart && origEnd && (
                       <div
                         className={`absolute rounded-md border shadow-sm cursor-grab active:cursor-grabbing ${
-                          isDragging ? 'shadow-lg ring-2 ring-blue-300 z-20' : 'z-10 hover:shadow-md'
+                          isCompleted
+                            ? 'z-10 opacity-60'
+                            : isDragging
+                              ? 'shadow-lg ring-2 ring-blue-300 z-20'
+                              : 'z-10 hover:shadow-md'
                         } ${colors.bar} ${colors.border}`}
                         style={{
                           left: barStyle.left,
@@ -454,9 +707,11 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
             })}
           </div>
         </div>
+        )}
+        </div>
 
         <div className="mt-3 flex items-center gap-4 text-[10px] text-gray-400">
-          <span>Drag bar to move · Drag edges to resize · Hover for details · Sorted by due date</span>
+          <span>Drag bar to move - Drag edges to resize - Hover for details</span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-6 rounded bg-red-400" /> Critical
             <span className="inline-block h-2.5 w-6 rounded bg-orange-400" /> High
@@ -468,3 +723,6 @@ export function GanttTimeline({ tasks, updateTask, sortBy = 'priority' }: Props)
     </Card>
   )
 }
+
+
+

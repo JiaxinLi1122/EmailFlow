@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic"
 import { NextRequest } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { getAuthUser, success, error } from '@/lib/api-helpers'
 import * as taskRepo from '@/repositories/task-repo'
 
@@ -36,7 +37,7 @@ export async function PATCH(
     'startDate', 'userSetDeadline', 'userNotes', 'checkedActionItems', 'actionItems',
   ]
   const dateFields = ['startDate', 'userSetDeadline']
-  const data: any = { isUserEdited: true, updatedAt: new Date() }
+  const data: Prisma.TaskUpdateInput = { isUserEdited: true, updatedAt: new Date() }
 
   for (const field of allowed) {
     if (body[field] !== undefined) {

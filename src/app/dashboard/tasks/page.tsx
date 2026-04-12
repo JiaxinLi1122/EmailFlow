@@ -19,8 +19,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { InlineNotice } from '@/components/inline-notice'
 import { PageHeader } from '@/components/page-header'
+import { MonthYearPanel } from '@/components/month-year-panel'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
   Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, ChevronDown, FolderOpen,
@@ -96,21 +98,6 @@ const STATUS_OPTIONS = [
   { value: 'confirmed', label: 'Confirmed' },
   { value: 'completed', label: 'Completed' },
   { value: 'dismissed', label: 'Dismissed' },
-]
-
-const MONTH_OPTIONS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
 ]
 
 export default function TasksPage() {
@@ -199,7 +186,7 @@ export default function TasksPage() {
   const tasks: TaskItem[] = (res as QueryResponse<TaskItem[]>)?.data || []
 
   return (
-    <div className="space-y-5 [scrollbar-gutter:stable]">
+    <div className="space-y-5">
       <PageHeader
         title="Tasks"
         description="Track what needs review, what is active, and what is already done."
@@ -233,7 +220,7 @@ export default function TasksPage() {
           />
 
           <div className="flex min-h-7 justify-start sm:min-w-[180px] sm:justify-end">
-            {viewMode !== 'calendar' ? (
+            {viewMode === 'list' ? (
               <SegmentedControl
                 value={sortBy}
                 onChange={setSortBy}
@@ -264,7 +251,7 @@ export default function TasksPage() {
         ) : viewMode === 'list' ? (
           <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
         ) : viewMode === 'timeline' ? (
-          <GanttTimeline tasks={tasks} updateTask={updateTask} sortBy={sortBy} />
+          <GanttTimeline tasks={tasks} updateTask={updateTask} />
         ) : (
           <TaskCalendarView tasks={tasks} updateTask={updateTask} />
         )}
@@ -480,51 +467,6 @@ function MatterSection({
   )
 }
 
-/* ========== LIST VIEW (flat, kept for rollback) ==========
-function TaskListViewFlat({ tasks, updateTask }: { tasks: any[]; updateTask: any }) {
-  const pendingTasks = tasks.filter((t: any) => t.status === 'pending')
-  const activeTasks = tasks.filter((t: any) => t.status === 'confirmed')
-  const completedTasks = tasks.filter((t: any) => t.status === 'completed')
-  const dismissedTasks = tasks.filter((t: any) => t.status === 'dismissed')
-  return (
-    <div className="space-y-4">
-      {pendingTasks.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600">Needs Review ({pendingTasks.length})</span>
-          </div>
-          {pendingTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
-        </div>
-      )}
-      {activeTasks.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">Active ({activeTasks.length})</span>
-          </div>
-          {activeTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
-        </div>
-      )}
-      {completedTasks.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-green-600">Completed ({completedTasks.length})</span>
-          </div>
-          {completedTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
-        </div>
-      )}
-      {dismissedTasks.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1 pt-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Dismissed ({dismissedTasks.length})</span>
-          </div>
-          {dismissedTasks.map((task: any) => <TaskRow key={task.id} task={task} updateTask={updateTask} />)}
-        </div>
-      )}
-    </div>
-  )
-}
-========== END FLAT VIEW ========== */
-
 /* ========== TASK ROW ========== */
 function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLike }) {
   const band = getPriorityBand(task.priorityScore || 0)
@@ -676,6 +618,7 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
   })
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const year = currentMonth.getFullYear()
   const month = currentMonth.getMonth()
@@ -687,7 +630,6 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
 
   const prevMonth = () => setCurrentMonth(new Date(year, month - 1, 1))
   const nextMonth = () => setCurrentMonth(new Date(year, month + 1, 1))
-  const yearOptions = Array.from({ length: 9 }, (_, index) => year - 4 + index)
 
   const todayStr = new Date().toDateString()
 
@@ -704,7 +646,16 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
     }
 
     for (const key of Object.keys(map)) {
-      map[key].sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0))
+      map[key].sort((a, b) => {
+        const aCompleted = a.status === 'completed'
+        const bCompleted = b.status === 'completed'
+
+        if (aCompleted !== bCompleted) {
+          return aCompleted ? 1 : -1
+        }
+
+        return (b.priorityScore ?? 0) - (a.priorityScore ?? 0)
+      })
     }
 
     return map
@@ -754,32 +705,20 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
           <Button variant="ghost" size="sm" onClick={prevMonth}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="Select year"
-              value={year}
-              onChange={(e) => setCurrentMonth(new Date(Number(e.target.value), month, 1))}
-              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
-            >
-              {yearOptions.map((optionYear) => (
-                <option key={optionYear} value={optionYear}>
-                  {optionYear}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Select month"
-              value={month}
-              onChange={(e) => setCurrentMonth(new Date(year, Number(e.target.value), 1))}
-              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition-colors hover:border-blue-200 focus:border-blue-400"
-            >
-              {MONTH_OPTIONS.map((monthName, index) => (
-                <option key={monthName} value={index}>
-                  {monthName}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger className="rounded-lg px-3 py-1.5 text-lg font-semibold text-gray-900 transition-colors hover:bg-blue-50 hover:text-blue-800">
+              {currentMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })}
+            </PopoverTrigger>
+            <PopoverContent align="center" className="w-auto border-0 bg-transparent p-0 shadow-none">
+              <MonthYearPanel
+                value={currentMonth}
+                onChange={(date) => {
+                  setCurrentMonth(date)
+                  setPickerOpen(false)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
           <Button variant="ghost" size="sm" onClick={nextMonth}>
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -816,10 +755,11 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
                 <div className="space-y-1">
                   {dayTasks.map((task) => {
                     const band = getPriorityBand(task.priorityScore || 0)
-                    const bgColor = band === 'critical' ? 'bg-red-100 border-red-300 text-red-800'
-                      : band === 'high' ? 'bg-orange-100 border-orange-300 text-orange-800'
-                      : band === 'medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-800'
-                      : 'bg-gray-100 border-gray-300 text-gray-700'
+                    const isCompleted = task.status === 'completed'
+                    const bgColor = band === 'critical' ? 'bg-red-200 border-red-400 text-red-950'
+                      : band === 'high' ? 'bg-orange-200 border-orange-400 text-orange-950'
+                      : band === 'medium' ? 'bg-amber-200 border-amber-400 text-amber-950'
+                      : 'bg-slate-200 border-slate-400 text-slate-800'
                     return (
                       <Link
                         key={task.id}
@@ -829,7 +769,9 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
                           e.dataTransfer.setData('text/plain', task.id)
                           e.dataTransfer.effectAllowed = 'move'
                         }}
-                        className={`block cursor-grab truncate rounded border px-1.5 py-0.5 text-[10px] font-medium leading-tight shadow-sm active:cursor-grabbing ${bgColor} ${
+                        className={`block cursor-grab truncate rounded-md border px-1.5 py-1 text-[10px] font-semibold leading-tight shadow-sm active:cursor-grabbing ${bgColor} ${
+                          isCompleted ? 'opacity-55 line-through saturate-[0.8]' : ''
+                        } ${
                           !cell.isCurrentMonth ? 'opacity-50' : ''
                         }`}
                         title={`${task.title} — drag to reschedule`}

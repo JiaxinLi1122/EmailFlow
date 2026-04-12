@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useEffect, useState } from 'react'
 
 export default function TotpSetupPage() {
@@ -102,9 +103,9 @@ export default function TotpSetupPage() {
           return
         }
 
-        setVerifyResult('Valid code ✅ 2FA enabled successfully')
+        setVerifyResult('2FA enabled successfully')
       } else {
-        setVerifyResult('Invalid code ❌')
+        setVerifyResult('Invalid code')
       }
     } catch {
       setError('Something went wrong')
@@ -137,10 +138,13 @@ export default function TotpSetupPage() {
 
         {qrCode && (
           <div className="space-y-4">
-            <img
+            <Image
               src={qrCode}
               alt="TOTP QR Code"
+              width={256}
+              height={256}
               className="mx-auto h-64 w-64 rounded-lg border"
+              unoptimized
             />
 
             <div>

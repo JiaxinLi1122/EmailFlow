@@ -24,14 +24,15 @@ export function PageTransition({ children, watchKey }: PageTransitionProps) {
   useEffect(() => {
     if (key !== prevKey.current) {
       prevKey.current = key
-      setPhase('exit')
+      const frame = requestAnimationFrame(() => setPhase('exit'))
       const timeout = setTimeout(() => {
         setDisplayChildren(children)
         setPhase('enter')
       }, 150)
-      return () => clearTimeout(timeout)
-    } else {
-      setDisplayChildren(children)
+      return () => {
+        cancelAnimationFrame(frame)
+        clearTimeout(timeout)
+      }
     }
   }, [key, children])
 
@@ -63,14 +64,15 @@ export function SectionFade({ children, watchKey }: PageTransitionProps) {
   useEffect(() => {
     if (key !== prevKey.current) {
       prevKey.current = key
-      setPhase('exit')
+      const frame = requestAnimationFrame(() => setPhase('exit'))
       const timeout = setTimeout(() => {
         setDisplayChildren(children)
         setPhase('enter')
       }, 120)
-      return () => clearTimeout(timeout)
-    } else {
-      setDisplayChildren(children)
+      return () => {
+        cancelAnimationFrame(frame)
+        clearTimeout(timeout)
+      }
     }
   }, [key, children])
 

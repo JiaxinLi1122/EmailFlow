@@ -132,7 +132,7 @@ export default function LandingPage() {
               </div>
 
               <p className="mt-4 text-xs text-gray-400">
-                Free to start · No credit card required · Works with Gmail
+                Free to start - No credit card required - Works with Gmail
               </p>
 
               <div className="animate-in fade-in slide-in-from-bottom-5 mt-12 grid gap-4 rounded-[28px] border border-white/80 bg-white/85 p-4 text-left shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur duration-500 sm:grid-cols-3">
@@ -250,3 +250,4 @@ export default function LandingPage() {
     </div>
   )
 }
+

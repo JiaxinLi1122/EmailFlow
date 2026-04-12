@@ -27,9 +27,9 @@ export default function PrivacyPage() {
 
           <section>
             <p>
-              Vaxon ("we", "us", "our") operates EmailFlow AI. This Privacy Policy explains what
+              Vaxon (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;) operates EmailFlow AI. This Privacy Policy explains what
               data we collect when you use our service, how we use it, and your rights regarding
-              that data. We take privacy seriously — especially because EmailFlow AI processes
+              that data. We take privacy seriously, especially because EmailFlow AI processes
               your email content.
             </p>
           </section>
@@ -125,11 +125,11 @@ export default function PrivacyPage() {
             <h2 className="text-base font-semibold text-gray-900 mb-3">5. Your rights</h2>
             <p>You have the right to:</p>
             <ul className="list-disc space-y-1.5 pl-5 mt-2">
-              <li><strong>Access</strong> — request a copy of the data we hold about you</li>
-              <li><strong>Correction</strong> — ask us to correct inaccurate data</li>
-              <li><strong>Deletion</strong> — delete your account and all associated data from Settings, or contact us</li>
-              <li><strong>Portability</strong> — request your task data in a machine-readable format</li>
-              <li><strong>Withdrawal of consent</strong> — disconnect your email account or delete your account at any time</li>
+              <li><strong>Access</strong> - request a copy of the data we hold about you</li>
+              <li><strong>Correction</strong> - ask us to correct inaccurate data</li>
+              <li><strong>Deletion</strong> - delete your account and all associated data from Settings, or contact us</li>
+              <li><strong>Portability</strong> - request your task data in a machine-readable format</li>
+              <li><strong>Withdrawal of consent</strong> - disconnect your email account or delete your account at any time</li>
             </ul>
             <p className="mt-3">
               To exercise any of these rights, contact us at{' '}
@@ -163,7 +163,7 @@ export default function PrivacyPage() {
             <h2 className="text-base font-semibold text-gray-900 mb-3">8. Changes to this policy</h2>
             <p>
               We may update this Privacy Policy from time to time. We will notify you of
-              significant changes via email or an in-app notice. The "last updated" date at the
+              significant changes via email or an in-app notice. The &quot;last updated&quot; date at the
               top of this page reflects the most recent revision.
             </p>
           </section>
@@ -176,17 +176,18 @@ export default function PrivacyPage() {
                 privacy@vaxon.ai
               </a>
               <br />
-              Vaxon — Australia
+              Vaxon - Australia
             </p>
           </section>
 
         </div>
 
         <div className="mt-12 border-t pt-6 flex items-center justify-between text-xs text-gray-400">
-          <span>© {new Date().getFullYear()} Vaxon. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} Vaxon. All rights reserved.</span>
           <Link href="/terms" className="text-blue-600 hover:underline">Terms of Service</Link>
         </div>
       </div>
     </div>
   )
 }
+

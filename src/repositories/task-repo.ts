@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { TaskExtractionResult, PriorityResult } from '@/ai'
 
@@ -58,10 +59,10 @@ export async function findTasksPaginated(
     sort?: 'priority' | 'date' | 'deadline' | 'title'
   }
 ) {
-  const where: any = { userId }
+  const where: Prisma.TaskWhereInput = { userId }
   if (options.status) where.status = options.status
 
-  const orderBy: any =
+  const orderBy: Prisma.TaskOrderByWithRelationInput =
     options.sort === 'priority'
       ? { priorityScore: 'desc' }
       : options.sort === 'deadline'
@@ -114,7 +115,7 @@ export async function findTaskById(userId: string, taskId: string) {
   })
 }
 
-export async function updateTask(taskId: string, data: Record<string, any>) {
+export async function updateTask(taskId: string, data: Prisma.TaskUpdateInput) {
   return prisma.task.update({ where: { id: taskId }, data })
 }
 
