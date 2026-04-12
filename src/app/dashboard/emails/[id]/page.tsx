@@ -18,9 +18,11 @@ import {
 } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/page-header'
 import { StatePanel } from '@/components/state-panel'
+import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import {
   ArrowLeft, Mail, Paperclip, Clock, ArrowUpRight,
   CheckSquare, Sparkles, Shield, Plus, Tag, X,
+  UserRound, ChevronRight, FolderOpen, Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -47,6 +49,7 @@ export default function EmailDetailPage() {
   const [classifying, setClassifying] = useState(false)
   const [unlinkingTaskId, setUnlinkingTaskId] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showReassign, setShowReassign] = useState(false)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskSummary, setTaskSummary] = useState('')
   const [linkedEmailIds, setLinkedEmailIds] = useState<string[]>([])
@@ -144,15 +147,13 @@ export default function EmailDetailPage() {
   if (!email) {
     return (
       <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/dashboard/emails')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
+          <ArrowLeft className="h-4 w-4" />
+          Back to inbox
+        </Button>
         <PageHeader
           title="Email unavailable"
           description="We couldn't find this message in the current workspace."
-          actions={(
-            <Button variant="outline" onClick={() => router.push('/dashboard/emails')} className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back to inbox
-            </Button>
-          )}
         />
         <StatePanel
           icon={<Mail className="h-5 w-5 text-gray-400" />}
@@ -168,9 +169,15 @@ export default function EmailDetailPage() {
   const senderName = email.sender?.split('<')[0]?.trim()
   const senderEmail = email.sender?.match(/<(.+?)>/)?.[1] || email.sender
   const senderInitial = (senderName || 'U')[0].toUpperCase()
+  const project = email.project ?? null
+  const matter = email.matter ?? null
 
   return (
     <div className="animate-in fade-in space-y-5 duration-200">
+      <Button variant="ghost" onClick={() => router.push('/dashboard/emails')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
+        <ArrowLeft className="h-4 w-4" />
+        Back to inbox
+      </Button>
       <PageHeader
         title={email.subject}
         description="Review the message, linked work, and AI classification in one place."
@@ -180,20 +187,48 @@ export default function EmailDetailPage() {
           hour: 'numeric',
           minute: '2-digit',
         })}`}
-        actions={(
-          <Button variant="outline" onClick={() => router.push('/dashboard/emails')} className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to inbox
-          </Button>
-        )}
       />
 
       <div className="mx-auto max-w-6xl space-y-5">
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <button
+          onClick={() => email.threadId && setShowReassign(true)}
+          disabled={!email.threadId}
+          className="group animate-fade-in-up stagger-2 flex w-full items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-2.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50 disabled:cursor-default disabled:opacity-60"
+          title={email.threadId ? 'Click to change project' : 'No thread ID — cannot reassign'}
+        >
+          <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="text-xs font-medium text-slate-500">{project?.identity?.name || 'Unassigned'}</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="text-xs font-semibold text-slate-700">{project?.name || 'Uncategorized'}</span>
+          {matter && (
+            <>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+              <span className="text-xs text-slate-500">{matter.title}</span>
+            </>
+          )}
+          {email.threadId && (
+            <span className="ml-auto flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 shadow-sm group-hover:border-blue-300 group-hover:text-blue-600">
+              <Pencil className="h-3 w-3" />
+              Change
+            </span>
+          )}
+        </button>
+
+        {email.threadId && (
+          <ReassignProjectModal
+            open={showReassign}
+            onOpenChange={setShowReassign}
+            threadId={email.threadId}
+            currentProject={project}
+            invalidateKeys={[['email', email.id]]}
+          />
+        )}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         {/* Left: Email content */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-4">
           {/* Header card */}
-          <Card className={`animate-fade-in-up stagger-2 overflow-hidden border-white/70 bg-gradient-to-br ${cls.bg} shadow-sm`}>
+          <Card className={`animate-fade-in-up stagger-3 overflow-hidden border-white/70 bg-gradient-to-br ${cls.bg} shadow-sm`}>
             <CardContent className="py-5 space-y-4">
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -248,13 +283,9 @@ export default function EmailDetailPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Right sidebar */}
-        <div className="space-y-4">
-          {/* AI Analysis */}
           {email.classReasoning && (
-            <Card className="animate-fade-in-up stagger-4 border-yellow-200 bg-gradient-to-br from-yellow-50/50 to-white shadow-sm">
+            <Card className="animate-fade-in-up stagger-4 border-yellow-200 bg-gradient-to-br from-yellow-50/55 to-white shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="h-4 w-4 text-yellow-600" />
@@ -262,23 +293,36 @@ export default function EmailDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-yellow-800 leading-relaxed">{email.classReasoning}</p>
+                <p className="text-sm leading-6 text-yellow-900/85">{email.classReasoning}</p>
               </CardContent>
             </Card>
           )}
+        </div>
 
+        {/* Right sidebar */}
+        <div className="space-y-4">
           {/* Linked Tasks */}
-          {email.taskLinks?.length > 0 && (
-            <Card className="animate-fade-in-up stagger-5 border-white/70 bg-white/95 shadow-sm">
+          <Card className="animate-fade-in-up stagger-5 border-white/70 bg-white/95 shadow-sm">
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <CheckSquare className="h-4 w-4 text-blue-600" />
-                  Linked Tasks
-                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">{email.taskLinks.length}</span>
-                </CardTitle>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <CheckSquare className="h-4 w-4 text-blue-600" />
+                    Linked Tasks
+                    <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">{email.taskLinks?.length || 0}</span>
+                  </CardTitle>
+                  <Button
+                    size="sm"
+                    onClick={() => setShowCreateModal(true)}
+                    className="h-8 gap-1.5 bg-blue-600 px-3 hover:bg-blue-700"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Create
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-2">
-                {(email.taskLinks as EmailTaskLink[]).map((link) => {
+                {email.taskLinks?.length ? (
+                  (email.taskLinks as EmailTaskLink[]).map((link) => {
                   const band = getPriorityBand(link.task.priorityScore || 0)
                   const isDone = link.task.status === 'completed' || link.task.status === 'dismissed'
                   const isUnlinking = unlinkingTaskId === link.task.id
@@ -330,13 +374,56 @@ export default function EmailDetailPage() {
                       </button>
                     </div>
                   )
-                })}
+                  })
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-4">
+                    <p className="text-sm font-medium text-slate-700">No linked tasks yet</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Create a task here to keep this email connected to work that follows from it.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          )}
+
+          {/* Reclassify */}
+          <Card className="animate-fade-in-up stagger-6 border-white/70 bg-white/95 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Tag className="h-4 w-4 text-blue-600" />
+                Mark As
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className={`rounded-xl border px-3 py-3 ${cls.color}`}>
+                <div className="flex items-center gap-2">
+                  <ClsIcon className="h-4 w-4" />
+                  <div>
+                    <p className="text-sm font-semibold">{cls.label}</p>
+                    <p className="text-[11px] opacity-80">Current classification</p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(EMAIL_CLASS_CONFIG).map(([key, config]) => (
+                  <Button
+                    key={key}
+                    variant={email.classification === key ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => handleClassify(key)}
+                    disabled={classifying}
+                    className={`h-auto min-h-11 justify-start gap-2 px-3 py-2 text-left ${email.classification === key ? '' : 'bg-white'}`}
+                  >
+                    <config.icon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="whitespace-normal leading-4">{config.label}</span>
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Email metadata */}
-          <Card className="animate-fade-in-up stagger-6 border-white/70 bg-white/95 shadow-sm">
+          <Card className="animate-fade-in-up stagger-7 border-white/70 bg-white/95 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Shield className="h-4 w-4 text-gray-400" />
@@ -372,51 +459,6 @@ export default function EmailDetailPage() {
               </dl>
             </CardContent>
           </Card>
-
-          {/* Reclassify */}
-          <Card className="animate-fade-in-up stagger-7 border-white/70 bg-white/95 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Tag className="h-4 w-4 text-blue-600" />
-                Mark As
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {Object.entries(EMAIL_CLASS_CONFIG).map(([key, config]) => (
-                <Button
-                  key={key}
-                  variant={email.classification === key ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => handleClassify(key)}
-                  disabled={classifying}
-                  className="w-full justify-start gap-2"
-                >
-                  <config.icon className="h-3.5 w-3.5" />
-                  {config.label}
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Quick Actions */}
-          <Card className="animate-fade-in-up stagger-8 border-white/70 bg-white/95 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Plus className="h-4 w-4 text-blue-600" />
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button
-                onClick={() => setShowCreateModal(true)}
-                className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4" />
-                Create Task
-              </Button>
-            </CardContent>
-          </Card>
-
         </div>
         </div>
       </div>

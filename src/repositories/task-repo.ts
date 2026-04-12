@@ -155,7 +155,7 @@ async function buildThreadContextMap(userId: string, threadIds: string[]) {
 }
 
 export async function findTaskById(userId: string, taskId: string) {
-  return prisma.task.findFirst({
+  const task = await prisma.task.findFirst({
     where: { id: taskId, userId },
     include: {
       emailLinks: {
@@ -168,12 +168,25 @@ export async function findTaskById(userId: string, taskId: string) {
               bodyPreview: true,
               receivedAt: true,
               classification: true,
+              threadId: true,
             },
           },
         },
       },
     },
   })
+
+  const threadId = task?.emailLinks?.[0]?.email?.threadId ?? null
+  if (!task || !threadId) return task
+
+  try {
+    const ctxMap = await buildThreadContextMap(userId, [threadId])
+    const ctx = ctxMap.get(threadId)
+    return { ...task, project: ctx?.project ?? null, matter: ctx?.matter ?? null }
+  } catch (err) {
+    console.error('[task-repo] detail enrichment failed:', err)
+    return task
+  }
 }
 
 export async function updateTask(taskId: string, data: Prisma.TaskUpdateInput) {

@@ -11,10 +11,12 @@ import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/page-header'
 import { StatePanel } from '@/components/state-panel'
 import { InlineNotice } from '@/components/inline-notice'
+import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import {
   ArrowLeft, Mail, Calendar, TrendingUp, ExternalLink,
   CheckCircle2, ListChecks, FileText, Sparkles, ThumbsUp,
   X, Check, AlertTriangle, Shield, RotateCcw, Square, CheckSquare, Plus,
+  UserRound, ChevronRight, FolderOpen, Pencil,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
@@ -47,6 +49,7 @@ type TaskEmailLink = {
     subject: string
     sender?: string | null
     receivedAt: string
+    threadId?: string | null
   }
 }
 
@@ -178,6 +181,7 @@ export default function TaskDetailPage() {
   const [unlinkingEmailId, setUnlinkingEmailId] = useState<string | null>(null)
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
   const [editingField, setEditingField] = useState<string | null>(null)
+  const [showReassign, setShowReassign] = useState(false)
 
   useEffect(() => {
     if (task) {
@@ -411,15 +415,13 @@ export default function TaskDetailPage() {
   if (!task) {
     return (
       <div className="space-y-4">
+        <Button variant="ghost" onClick={() => router.push('/dashboard/tasks')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
+          <ArrowLeft className="h-4 w-4" />
+          Back to tasks
+        </Button>
         <PageHeader
           title="Task unavailable"
           description="We couldn't find this task in the current workspace."
-          actions={(
-            <Button variant="outline" onClick={() => router.push('/dashboard/tasks')} className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back to tasks
-            </Button>
-          )}
         />
         <StatePanel
           icon={<ListChecks className="h-5 w-5 text-gray-400" />}
@@ -434,9 +436,16 @@ export default function TaskDetailPage() {
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const sts = statusConfig[task.status] || statusConfig.pending
   const StsIcon = sts.icon
+  const project = task.project ?? null
+  const matter = task.matter ?? null
+  const threadId = task.emailLinks?.[0]?.email?.threadId ?? null
 
   return (
     <div className="animate-in fade-in space-y-5 duration-200">
+      <Button variant="ghost" onClick={() => router.push('/dashboard/tasks')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
+        <ArrowLeft className="h-4 w-4" />
+        Back to tasks
+      </Button>
       <PageHeader
         title={task.title}
         description="Review task details, refine AI output, and keep linked source emails in sync."
@@ -444,21 +453,48 @@ export default function TaskDetailPage() {
           month: 'short',
           day: 'numeric',
           year: 'numeric',
-        })} • ${task.emailLinks?.length || 0} linked email${task.emailLinks?.length === 1 ? '' : 's'}`}
-        actions={(
-          <Button variant="outline" onClick={() => router.push('/dashboard/tasks')} className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to tasks
-          </Button>
-        )}
+        })} · ${task.emailLinks?.length || 0} linked email${task.emailLinks?.length === 1 ? '' : 's'}`}
       />
 
       <div className="mx-auto max-w-6xl space-y-5">
+        <button
+          onClick={() => threadId && setShowReassign(true)}
+          disabled={!threadId}
+          className="group animate-fade-in-up stagger-2 flex w-full items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-2.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50 disabled:cursor-default disabled:opacity-60"
+          title={threadId ? 'Click to change project' : 'No email thread linked — cannot reassign'}
+        >
+          <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="text-xs font-medium text-slate-500">{project?.identity?.name || 'Unassigned'}</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="text-xs font-semibold text-slate-700">{project?.name || 'Uncategorized'}</span>
+          {matter && (
+            <>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+              <span className="text-xs text-slate-500">{matter.title}</span>
+            </>
+          )}
+          <span className="ml-auto flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 shadow-sm group-hover:border-blue-300 group-hover:text-blue-600">
+            <Pencil className="h-3 w-3" />
+            Change
+          </span>
+        </button>
+
+        {threadId && (
+          <ReassignProjectModal
+            open={showReassign}
+            onOpenChange={setShowReassign}
+            threadId={threadId}
+            currentProject={project}
+            invalidateKeys={[['task', taskId]]}
+          />
+        )}
+
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Task content */}
         <div className="lg:col-span-2 space-y-4">
           {/* Header card */}
-          <Card className={`animate-fade-in-up stagger-2 overflow-hidden border-white/70 bg-gradient-to-br ${sts.bg} shadow-sm`}>
+          <Card className={`animate-fade-in-up stagger-3 overflow-hidden border-white/70 bg-gradient-to-br ${sts.bg} shadow-sm`}>
             <CardContent className="py-5 space-y-4">
               {/* Meta badges */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -480,57 +516,65 @@ export default function TaskDetailPage() {
 
               {/* Quick actions for pending */}
               {task.status === 'pending' && (
-                <InlineNotice variant="warning" className="items-center justify-between gap-3">
-                  <span className="flex-1">This task still needs your review before it becomes active work.</span>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
-                      <ThumbsUp className="h-3.5 w-3.5" />
-                      Confirm
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
-                      <X className="h-3.5 w-3.5" />
-                      Dismiss
-                    </Button>
+                <InlineNotice variant="warning">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="min-w-0 flex-1 text-left">This task still needs your review before it becomes active work.</span>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
+                        <ThumbsUp className="h-3.5 w-3.5" />
+                        Confirm
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
+                        <X className="h-3.5 w-3.5" />
+                        Dismiss
+                      </Button>
+                    </div>
                   </div>
                 </InlineNotice>
               )}
 
               {/* Quick actions for confirmed */}
               {task.status === 'confirmed' && (
-                <InlineNotice variant="info" className="items-center justify-between gap-3">
-                  <span className="flex-1">Task confirmed and ready to track. Mark it complete when the work is done.</span>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('completed')}>
-                      <Check className="h-3.5 w-3.5" />
-                      Complete
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
-                      <X className="h-3.5 w-3.5" />
-                      Dismiss
-                    </Button>
+                <InlineNotice variant="info">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="min-w-0 flex-1 text-left">Task confirmed and ready to track. Mark it complete when the work is done.</span>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('completed')}>
+                        <Check className="h-3.5 w-3.5" />
+                        Complete
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
+                        <X className="h-3.5 w-3.5" />
+                        Dismiss
+                      </Button>
+                    </div>
                   </div>
                 </InlineNotice>
               )}
 
               {/* Quick actions for completed */}
               {task.status === 'completed' && (
-                <InlineNotice variant="success" className="items-center justify-between gap-3">
-                  <span className="flex-1">This task is marked complete. Reopen it if more work shows up.</span>
-                  <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Reopen
-                  </Button>
+                <InlineNotice variant="success">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="min-w-0 flex-1 text-left">This task is marked complete. Reopen it if more work shows up.</span>
+                    <Button size="sm" variant="outline" className="ml-auto h-8 shrink-0 gap-1.5" onClick={() => handleStatusChange('confirmed')}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Reopen
+                    </Button>
+                  </div>
                 </InlineNotice>
               )}
 
               {/* Quick actions for dismissed */}
               {task.status === 'dismissed' && (
-                <InlineNotice className="items-center justify-between gap-3 border-gray-200 bg-gray-50 text-gray-700">
-                  <span className="flex-1">This task is currently dismissed. Bring it back if the email turns into real work later.</span>
-                  <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('pending')}>
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Re-review
-                  </Button>
+                <InlineNotice className="border-gray-200 bg-gray-50 text-gray-700">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="min-w-0 flex-1 text-left">This task is currently dismissed. Bring it back if the email turns into real work later.</span>
+                    <Button size="sm" variant="outline" className="ml-auto h-8 shrink-0 gap-1.5" onClick={() => handleStatusChange('pending')}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Re-review
+                    </Button>
+                  </div>
                 </InlineNotice>
               )}
 

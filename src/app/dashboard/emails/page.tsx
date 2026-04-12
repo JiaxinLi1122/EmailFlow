@@ -352,18 +352,20 @@ export default function EmailsPage() {
               )}
             </div>
 
-            {/* Classification filter */}
-            <SegmentedControl
-              value={classification}
-              onChange={setClassification}
-              options={[
-                { value: 'all', label: 'All' },
-                { value: 'action', label: 'Action' },
-                { value: 'awareness', label: 'Awareness' },
-                { value: 'ignore', label: 'Ignored' },
-                { value: 'uncertain', label: 'Uncertain' },
-              ]}
-            />
+            {/* Classification filter — only meaningful on All Mail tab */}
+            {tab === 'all' && (
+              <SegmentedControl
+                value={classification}
+                onChange={setClassification}
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'action', label: 'Action' },
+                  { value: 'awareness', label: 'Awareness' },
+                  { value: 'ignore', label: 'Ignored' },
+                  { value: 'uncertain', label: 'Uncertain' },
+                ]}
+              />
+            )}
 
             {accounts.length > 1 && (
               <SegmentedControl
