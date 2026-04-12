@@ -441,22 +441,22 @@ export default function TaskDetailPage() {
   const threadId = task.emailLinks?.[0]?.email?.threadId ?? null
 
   return (
-    <div className="animate-in fade-in space-y-5 duration-200">
+    <div className="animate-in fade-in duration-200">
       <Button variant="ghost" onClick={() => router.push('/dashboard/tasks')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
         <ArrowLeft className="h-4 w-4" />
         Back to tasks
       </Button>
-      <PageHeader
-        title={task.title}
-        description="Review task details, refine AI output, and keep linked source emails in sync."
-        meta={`Created ${new Date(task.createdAt).toLocaleDateString('en', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })} · ${task.emailLinks?.length || 0} linked email${task.emailLinks?.length === 1 ? '' : 's'}`}
-      />
-
       <div className="mx-auto max-w-6xl space-y-5">
+        <PageHeader
+          title={task.title}
+          description="Review task details, refine AI output, and keep linked source emails in sync."
+          meta={`Created ${new Date(task.createdAt).toLocaleDateString('en', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })} · ${task.emailLinks?.length || 0} linked email${task.emailLinks?.length === 1 ? '' : 's'}`}
+        />
+
         <button
           onClick={() => threadId && setShowReassign(true)}
           disabled={!threadId}
@@ -959,7 +959,7 @@ export default function TaskDetailPage() {
                   </button>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3 pt-3">
+              <CardContent className="space-y-3 px-3 pt-3">
                 {/* Progress bar */}
                 {checklistItems.length > 1 && (
                   <div className="mb-3 h-1.5 rounded-full bg-gray-100 overflow-hidden">
@@ -971,7 +971,7 @@ export default function TaskDetailPage() {
                 )}
 
                 {/* Item list */}
-                <ul className="space-y-1.5">
+                <ul className="-ml-2 space-y-1.5">
                   {checklistItems.map((item, idx) => {
                     const isEditing = editingItemId === item.id
                     const isExpanded = expandedItems.has(item.id)
@@ -1004,8 +1004,8 @@ export default function TaskDetailPage() {
                     return (
                       <li
                         key={item.id}
-                        className={`relative flex items-center gap-2 rounded-lg transition-all hover:bg-gray-50 group`}
-                        style={{ paddingLeft: `${item.level * 16}px` }}
+                        className="group relative flex items-center gap-2 rounded-lg transition-all hover:bg-gray-50"
+                        style={{ paddingLeft: `${item.level * 8}px` }}
                       >
                         {/* Expand/Collapse button */}
                         {itemHasChildren && !isEditing ? (
@@ -1034,13 +1034,13 @@ export default function TaskDetailPage() {
                             </svg>
                           </button>
                         ) : (
-                          <div className="shrink-0 w-6" />
+                          <div className="shrink-0 w-0.5" />
                         )}
 
                         {/* Checkbox */}
                         <button
                           onClick={() => toggleCheckItem(item.id)}
-                          className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors"
+                          className="shrink-0 rounded p-1 hover:bg-gray-100 transition-colors"
                         >
                           {item.completed ? (
                             <CheckSquare className="h-4 w-4 text-blue-500" />

@@ -322,16 +322,24 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
   const toggleIdentity = (id: string) =>
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 
   const toggleProject = (id: string) =>
     setCollapsedProjects((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
+
+  const sortItemsWithinGroup = useCallback((items: TaskItem[]) => {
+    const active = items.filter((task) => task.status !== 'completed' && task.status !== 'dismissed')
+    const done = items.filter((task) => task.status === 'completed' || task.status === 'dismissed')
+    return [...active, ...done]
+  }, [])
 
   const { identityGroups, ungrouped } = useMemo(() => {
     const ungrouped: TaskItem[] = []
@@ -355,7 +363,7 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
     const identityGroups: IdentityGroup[] = Array.from(identityMap.entries())
       .map(([id, { name, projectMap }]) => {
         const projects = Array.from(projectMap.entries())
-          .map(([pid, { name, items }]) => ({ id: pid, name, items }))
+          .map(([pid, { name, items }]) => ({ id: pid, name, items: sortItemsWithinGroup(items) }))
           .sort((a, b) => latestScore(b.items) - latestScore(a.items))
         return { id, name, projects }
       })
@@ -363,8 +371,8 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
         latestScore(b.projects.flatMap((p) => p.items)) - latestScore(a.projects.flatMap((p) => p.items))
       )
 
-    return { identityGroups, ungrouped }
-  }, [tasks])
+    return { identityGroups, ungrouped: sortItemsWithinGroup(ungrouped) }
+  }, [sortItemsWithinGroup, tasks])
 
   if (tasks.length === 0) {
     return (

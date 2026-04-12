@@ -173,14 +173,15 @@ export default function EmailDetailPage() {
   const matter = email.matter ?? null
 
   return (
-    <div className="animate-in fade-in space-y-5 duration-200">
+    <div className="animate-in fade-in duration-200">
       <Button variant="ghost" onClick={() => router.push('/dashboard/emails')} className="w-fit gap-2 px-0 text-gray-500 hover:bg-transparent hover:text-gray-900">
         <ArrowLeft className="h-4 w-4" />
         Back to inbox
       </Button>
-      <PageHeader
-        title={email.subject}
-        description="Review the message, linked work, and AI classification in one place."
+      <div className="mx-auto max-w-6xl space-y-5">
+        <PageHeader
+          title={email.subject}
+          description="Review the message, linked work, and AI classification in one place."
         meta={`From ${senderName || senderEmail} • ${new Date(email.receivedAt).toLocaleString('en', {
           month: 'short',
           day: 'numeric',
@@ -189,7 +190,6 @@ export default function EmailDetailPage() {
         })}`}
       />
 
-      <div className="mx-auto max-w-6xl space-y-5">
         <button
           onClick={() => email.threadId && setShowReassign(true)}
           disabled={!email.threadId}
