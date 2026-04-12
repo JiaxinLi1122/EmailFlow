@@ -1,25 +1,26 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAuth } from '@/lib/use-auth'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InlineNotice } from '@/components/inline-notice'
 import { PageHeader } from '@/components/page-header'
 import {
   CalendarIcon,
   Clock3,
+  Check,
+  ChevronsUpDown,
   Globe,
   KeyRound,
   Loader2,
-  Lock,
   LogOut,
   Mail,
-  RotateCcw,
   Shield,
   Unplug,
 } from 'lucide-react'
@@ -35,6 +36,86 @@ type CurrentUser = {
 }
 
 const SYNC_PRESETS = [7, 15, 30] as const
+const POPULAR_TIMEZONES = [
+  'UTC',
+  'Australia/Sydney',
+  'Australia/Melbourne',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Europe/London',
+  'Europe/Paris',
+  'America/Los_Angeles',
+  'America/New_York',
+  'America/Toronto',
+  'America/Caracas',
+] as const
+const TIMEZONE_CITY_ALIASES: Record<string, string[]> = {
+  UTC: ['utc', 'gmt', 'greenwich'],
+  'Australia/Sydney': ['sydney', 'nsw', 'canberra'],
+  'Australia/Melbourne': ['melbourne', 'victoria'],
+  'Asia/Shanghai': ['beijing', 'shanghai', 'shenzhen', 'guangzhou', 'hangzhou', 'nanjing', 'suzhou', 'china'],
+  'Asia/Singapore': ['singapore'],
+  'Asia/Tokyo': ['tokyo', 'osaka', 'japan'],
+  'Europe/London': ['london', 'uk', 'england'],
+  'Europe/Paris': ['paris', 'france'],
+  'America/Los_Angeles': ['los angeles', 'la', 'san francisco', 'seattle', 'vancouver', 'pst'],
+  'America/New_York': ['new york', 'nyc', 'boston', 'miami', 'washington', 'est'],
+  'America/Toronto': ['toronto', 'ottawa', 'montreal', 'canada'],
+  'America/Caracas': ['caracas', 'venezuela'],
+  'America/Chicago': ['chicago', 'houston', 'dallas', 'austin', 'cst'],
+  'America/Denver': ['denver', 'phoenix', 'mountain', 'mst'],
+  'Europe/Berlin': ['berlin', 'munich', 'germany'],
+  'Europe/Madrid': ['madrid', 'barcelona', 'spain'],
+  'Europe/Rome': ['rome', 'milan', 'italy'],
+  'Asia/Dubai': ['dubai', 'abu dhabi', 'uae'],
+  'Asia/Kolkata': ['india', 'delhi', 'mumbai', 'bangalore', 'kolkata'],
+  'Asia/Bangkok': ['bangkok', 'thailand'],
+  'Asia/Hong_Kong': ['hong kong', 'hk'],
+  'Asia/Seoul': ['seoul', 'korea'],
+  'Pacific/Auckland': ['auckland', 'wellington', 'new zealand'],
+}
+
+function formatTimezoneRegion(timezone: string) {
+  const region = timezone.split('/')[0] || timezone
+  return region.replaceAll('_', ' ')
+}
+
+function formatTimezoneCode(timezone: string) {
+  return timezone.replaceAll('_', ' / ')
+}
+
+function getTimezoneOffsetLabel(timezone: string) {
+  try {
+    const now = new Date()
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+    })
+    const part = formatter.formatToParts(now).find((item) => item.type === 'timeZoneName')?.value || 'UTC'
+    return part.replace('GMT', 'UTC')
+  } catch {
+    return 'UTC'
+  }
+}
+
+function getTimezoneSearchText(timezone: string) {
+  const offset = getTimezoneOffsetLabel(timezone).toLowerCase()
+  const normalized = timezone.toLowerCase()
+  const code = formatTimezoneCode(timezone).toLowerCase()
+  const region = formatTimezoneRegion(timezone).toLowerCase()
+  const aliases = (TIMEZONE_CITY_ALIASES[timezone] || []).join(' ').toLowerCase()
+  return `${normalized} ${code} ${offset} ${region} ${aliases}`
+}
+
+function getTimezonePrimaryLabel(timezone: string) {
+  if (timezone === 'UTC') {
+    return 'UTC'
+  }
+
+  const region = timezone.split('/')[0] || timezone
+  return `${formatTimezoneRegion(region)} (${getTimezoneOffsetLabel(timezone)})`
+}
 
 export default function SettingsPage() {
   const { user, logout } = useAuth()
@@ -42,7 +123,15 @@ export default function SettingsPage() {
   const [syncPickerOpen, setSyncPickerOpen] = useState(false)
   const [pendingDate, setPendingDate] = useState<Date | undefined>()
   const [todayMs] = useState(() => Date.now())
-  const [timezoneInput, setTimezoneInput] = useState<string | null>(null)
+  const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
+  const [timezoneSearch, setTimezoneSearch] = useState('')
+  const [deviceTimezone] = useState<string | null>(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+    } catch {
+      return null
+    }
+  })
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -61,6 +150,50 @@ export default function SettingsPage() {
   const gmailConnected = Boolean(syncData?.gmailConnected)
   const connectedGmail = currentUser?.gmailEmail || null
   const currentSyncStartDate = currentUser?.syncStartDate ? new Date(currentUser.syncStartDate) : null
+  const supportedTimezones = useMemo(() => {
+    if (typeof Intl !== 'undefined' && 'supportedValuesOf' in Intl) {
+      return Intl.supportedValuesOf('timeZone')
+    }
+
+    return [
+      'UTC',
+      'Australia/Sydney',
+      'Asia/Shanghai',
+      'America/Los_Angeles',
+      'America/New_York',
+      'Europe/London',
+    ]
+  }, [])
+
+  const effectiveTimezone = currentUser?.timezone || deviceTimezone || 'UTC'
+  const timezoneResults = useMemo(() => {
+    const query = timezoneSearch.trim().toLowerCase()
+
+    if (!query) {
+      return POPULAR_TIMEZONES.filter((timezone) => supportedTimezones.includes(timezone))
+    }
+
+    const scored = supportedTimezones
+        .map((timezone) => {
+          const lower = timezone.toLowerCase()
+          const label = formatTimezoneCode(timezone).toLowerCase()
+          const offset = getTimezoneOffsetLabel(timezone).toLowerCase()
+          const searchable = getTimezoneSearchText(timezone)
+          let score = 0
+
+        if (lower.startsWith(query)) score += 4
+        if (label.startsWith(query)) score += 3
+        if (lower.includes(`/${query}`)) score += 2
+        if (offset.includes(query)) score += 2
+        if (searchable.includes(query)) score += 1
+
+        return { timezone, score }
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.timezone.localeCompare(b.timezone))
+
+    return scored.slice(0, 16).map((item) => item.timezone)
+  }, [supportedTimezones, timezoneSearch])
 
   const syncSummary = (() => {
     if (!currentUser?.syncStartDate) {
@@ -149,7 +282,8 @@ export default function SettingsPage() {
     },
     onSuccess: () => {
       toast.success('Timezone updated')
-      setTimezoneInput(null)
+      setTimezoneSearch('')
+      setTimezonePickerOpen(false)
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
@@ -404,38 +538,127 @@ export default function SettingsPage() {
             <div className="flex-1 space-y-1">
               <p className="text-sm font-semibold text-gray-900">Daily digest timezone</p>
               <p className="text-sm text-gray-500">
-                Your digest generates at 20:00 in this timezone. Use an IANA name like{' '}
-                <code className="rounded bg-gray-200 px-1 py-0.5 text-xs">Australia/Sydney</code> or{' '}
-                <code className="rounded bg-gray-200 px-1 py-0.5 text-xs">Asia/Shanghai</code>.
+                Your digest generates at 20:00 in this timezone. We first detect your current device timezone, and you can search to switch it if needed.
               </p>
             </div>
-            <div className="flex items-center gap-2 self-end sm:self-auto">
-              <input
-                type="text"
-                className="h-9 w-48 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 placeholder-gray-400 focus:border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-200"
-                placeholder={currentUser?.timezone || 'UTC'}
-                value={timezoneInput ?? ''}
-                onChange={(e) => setTimezoneInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && timezoneInput?.trim()) {
-                    timezoneMutation.mutate(timezoneInput.trim())
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                disabled={!timezoneInput?.trim() || timezoneMutation.isPending}
-                onClick={() => timezoneInput?.trim() && timezoneMutation.mutate(timezoneInput.trim())}
-              >
-                {timezoneMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTimezonePickerOpen(true)}
+              className="min-w-64 justify-between gap-2 self-end sm:self-auto"
+            >
+                <span className="truncate text-left">{getTimezonePrimaryLabel(effectiveTimezone)}</span>
+                <ChevronsUpDown className="h-3.5 w-3.5 text-gray-400" />
+            </Button>
+            <Dialog
+              open={timezonePickerOpen}
+              onOpenChange={(open) => {
+                setTimezonePickerOpen(open)
+                if (!open) {
+                  setTimezoneSearch('')
+                }
+              }}
+            >
+              <DialogContent className="max-w-xl gap-0 overflow-hidden rounded-2xl border border-gray-200 p-0 shadow-xl">
+                <DialogHeader className="border-b border-gray-100 px-5 py-4">
+                  <DialogTitle>Choose timezone</DialogTitle>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Search by timezone name, city alias, or UTC offset. The detected timezone from this device is highlighted first.
+                  </p>
+                </DialogHeader>
+                <div className="border-b border-gray-100 p-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 placeholder-gray-400 focus:border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-200"
+                      placeholder="Search timezone, city, or UTC offset..."
+                      value={timezoneSearch}
+                      onChange={(e) => setTimezoneSearch(e.target.value)}
+                    />
+                    {timezoneSearch ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setTimezoneSearch('')}
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="max-h-[28rem] overflow-y-auto p-3">
+                  {deviceTimezone && (!timezoneSearch || getTimezoneSearchText(deviceTimezone).includes(timezoneSearch.toLowerCase())) ? (
+                    <button
+                      onClick={() => timezoneMutation.mutate(deviceTimezone)}
+                      className="mb-3 flex w-full items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-left transition hover:bg-blue-100/70"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                        <Globe className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-blue-900">
+                          {getTimezonePrimaryLabel(deviceTimezone)}
+                        </p>
+                        <p className="text-xs text-blue-700/80">
+                          Detected from this device - {formatTimezoneCode(deviceTimezone)}
+                        </p>
+                      </div>
+                      {effectiveTimezone === deviceTimezone ? <Check className="h-4 w-4 text-blue-700" /> : null}
+                    </button>
+                  ) : null}
+
+                  <div className="space-y-1">
+                    {!timezoneSearch ? (
+                      <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+                        Common timezones
+                      </p>
+                    ) : null}
+                    {timezoneResults.map((timezone) => (
+                      <button
+                        key={timezone}
+                        onClick={() => timezoneMutation.mutate(timezone)}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-gray-100"
+                      >
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                          <Globe className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-900">
+                            {getTimezonePrimaryLabel(timezone)}
+                          </p>
+                          <p className="truncate text-xs text-gray-500">
+                            {formatTimezoneCode(timezone)}
+                          </p>
+                        </div>
+                        {effectiveTimezone === timezone ? <Check className="h-4 w-4 text-blue-700" /> : null}
+                      </button>
+                    ))}
+                    {timezoneSearch && timezoneResults.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-gray-200 px-3 py-5 text-center text-sm text-gray-500">
+                        No timezone matches. Try a city like <span className="font-medium text-gray-700">Beijing</span>, a region like <span className="font-medium text-gray-700">Australia</span>, or an offset like <span className="font-medium text-gray-700">UTC+10</span>.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
-          {currentUser?.timezone && (
-            <p className="text-xs text-gray-400">
-              Current timezone: <span className="font-medium text-gray-600">{currentUser.timezone}</span>
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span>
+              Current timezone: <span className="font-medium text-gray-700">{getTimezonePrimaryLabel(effectiveTimezone)}</span>
+            </span>
+            {deviceTimezone && currentUser?.timezone !== deviceTimezone ? (
+              <button
+                type="button"
+                onClick={() => timezoneMutation.mutate(deviceTimezone)}
+                className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 transition hover:bg-blue-100"
+              >
+                Use detected timezone
+              </button>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -446,28 +669,20 @@ export default function SettingsPage() {
             Privacy and Data Handling
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <InfoTile
-              icon={<Mail className="h-4 w-4 text-blue-700" />}
-              title="Read-only access"
-              body="EmailFlow AI reads email to classify threads and extract tasks. It cannot send or delete mail."
-            />
-            <InfoTile
-              icon={<Lock className="h-4 w-4 text-blue-700" />}
-              title="Processing"
-              body="Email content is processed by AI providers for classification and summarization using the safeguards configured by the product."
-            />
-            <InfoTile
-              icon={<RotateCcw className="h-4 w-4 text-blue-700" />}
-              title="Disconnect anytime"
-              body="Disconnecting Gmail stops future sync runs. Existing tasks and stored records remain until you clear account data."
-            />
-            <InfoTile
-              icon={<Shield className="h-4 w-4 text-blue-700" />}
-              title="Low-friction review"
-              body="The settings flow is designed to make connection state, sync range, and password recovery easy to audit."
-            />
+        <CardContent>
+          <div className="divide-y divide-gray-200/70 text-sm leading-6 text-gray-500">
+            <div className="pb-2.5">
+              <span className="font-medium text-gray-700">Read-only access:</span>{' '}
+              EmailFlow AI reads email to classify threads and extract tasks. It cannot send or delete mail.
+            </div>
+            <div className="py-2.5">
+              <span className="font-medium text-gray-700">Processing:</span>{' '}
+              Email content is processed by AI providers for classification and summarization using the safeguards configured by the product.
+            </div>
+            <div className="pt-2.5">
+              <span className="font-medium text-gray-700">Disconnect anytime:</span>{' '}
+              Disconnecting Gmail stops future sync runs. Existing tasks and stored records remain until you clear account data.
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -537,25 +752,5 @@ function PasswordCard() {
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function InfoTile({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode
-  title: string
-  body: string
-}) {
-  return (
-    <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
-      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
-        {icon}
-      </div>
-      <p className="text-sm font-semibold text-gray-900">{title}</p>
-      <p className="mt-1 text-sm leading-6 text-gray-600">{body}</p>
-    </div>
   )
 }
