@@ -50,6 +50,9 @@
 }
 
 :root {
+  --font-inter: "Segoe UI", "SF Pro Text", system-ui, sans-serif;
+  --font-jakarta: "Aptos", "Segoe UI", "SF Pro Display", system-ui, sans-serif;
+  --font-jetbrains: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

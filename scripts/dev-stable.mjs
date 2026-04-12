@@ -3,6 +3,7 @@ import net from 'node:net'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -65,12 +66,23 @@ async function main() {
   }
 
   const nextBin = path.join(rootDir, 'node_modules', 'next', 'dist', 'bin', 'next')
+  const isInteractive = Boolean(process.stdout.isTTY && process.stderr.isTTY)
+  let stdio = 'inherit'
+
+  if (!isInteractive) {
+    const logDir = path.join(rootDir, '.next', 'dev', 'logs')
+    fs.mkdirSync(logDir, { recursive: true })
+    const outFd = fs.openSync(path.join(logDir, 'dev-server.stdout.log'), 'a')
+    const errFd = fs.openSync(path.join(logDir, 'dev-server.stderr.log'), 'a')
+    stdio = ['ignore', outFd, errFd]
+  }
+
   const child = spawn(
     process.execPath,
     [nextBin, 'dev', '--webpack', '--hostname', host, '--port', String(port)],
     {
       cwd: rootDir,
-      stdio: 'inherit',
+      stdio,
       env: {
         ...process.env,
         HOST: host,

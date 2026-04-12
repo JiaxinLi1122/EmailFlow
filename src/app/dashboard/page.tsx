@@ -326,10 +326,12 @@ export default function DashboardPage() {
 
       {(activeIdentities.length > 0 || activeProjects.length > 0) && (
         <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="border-gray-200/80 shadow-sm">
+          <Card className="border-sky-200/80 bg-[linear-gradient(180deg,rgba(240,249,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <UserRound className="h-4 w-4 text-blue-600" />
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-100">
+                  <UserRound className="h-3.5 w-3.5 text-sky-700" />
+                </span>
                 Active Identities
               </CardTitle>
             </CardHeader>
@@ -337,14 +339,19 @@ export default function DashboardPage() {
               {activeIdentities.length === 0 ? (
                 <p className="text-sm text-gray-400">No identity groupings yet.</p>
               ) : (
-                <div className="divide-y divide-slate-100">
+                <div className="space-y-2">
                   {activeIdentities.map((identity) => (
-                    <div key={identity.name} className="flex items-center justify-between py-3 first:pt-1 last:pb-1">
+                    <div
+                      key={identity.name}
+                      className="flex items-center justify-between rounded-xl border border-sky-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-sky-50/70"
+                    >
                       <div>
                         <p className="text-sm font-medium text-slate-900">{identity.name}</p>
                         <p className="text-xs text-slate-500">Role context inferred from recent matter activity</p>
                       </div>
-                      <span className="text-xs font-medium text-slate-500">{identity.count} matters</span>
+                      <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-100">
+                        {identity.count} matters
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -352,10 +359,12 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-gray-200/80 shadow-sm">
+          <Card className="border-violet-200/80 bg-[linear-gradient(180deg,rgba(245,243,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <FolderOpen className="h-4 w-4 text-blue-600" />
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-100">
+                  <FolderOpen className="h-3.5 w-3.5 text-violet-700" />
+                </span>
                 Active Projects
               </CardTitle>
             </CardHeader>
@@ -363,18 +372,20 @@ export default function DashboardPage() {
               {activeProjects.length === 0 ? (
                 <p className="text-sm text-gray-400">No project groupings yet.</p>
               ) : (
-                <div className="divide-y divide-slate-100">
+                <div className="space-y-2">
                   {activeProjects.map((project) => (
                     <Link
                       key={project.id}
                       href="/dashboard/tasks"
-                      className="flex items-center justify-between py-3 transition-colors first:pt-1 last:pb-1 hover:text-blue-700"
+                      className="flex items-center justify-between rounded-xl border border-violet-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-violet-50/70 hover:text-violet-700"
                     >
                       <div>
                         <p className="text-sm font-medium text-slate-900">{project.name}</p>
                         <p className="text-xs text-slate-500">Recently active grouped project context</p>
                       </div>
-                      <span className="text-xs font-medium text-slate-500">{project.count} matters</span>
+                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-100">
+                        {project.count} matters
+                      </span>
                     </Link>
                   ))}
                 </div>

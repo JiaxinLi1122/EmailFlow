@@ -311,7 +311,7 @@ export default function TasksPage() {
   )
 }
 
-/* ========== LIST VIEW — identity → project grouped ========== */
+/* ========== LIST VIEW - identity -> project grouped ========== */
 function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: MutationLike }) {
   type ProjectGroup = {
     identityKey: string
@@ -379,10 +379,17 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
         </div>
       ))}
       {ungrouped.length > 0 && (
-        <div className="space-y-2">
-          {ungrouped.map((task) => (
-            <TaskRow key={task.id} task={task} updateTask={updateTask} />
-          ))}
+        <div className="space-y-3">
+          <ContextGroupHeader
+            identityName="Unassigned"
+            projectName="Uncategorized"
+            detail={`${ungrouped.length} task${ungrouped.length !== 1 ? 's' : ''} without project context`}
+          />
+          <div className="space-y-2">
+            {ungrouped.map((task) => (
+              <TaskRow key={task.id} task={task} updateTask={updateTask} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -396,6 +403,7 @@ function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLik
   const senderName = task.emailLinks?.[0]?.email?.sender?.split('<')[0]?.trim()
   const isPending = task.status === 'pending'
   const isDone = task.status === 'completed' || task.status === 'dismissed'
+  const matter = task.matter ?? null
 
   const handleComplete = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -462,6 +470,9 @@ function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLik
         </div>
         <p className="mt-0.5 truncate text-xs text-gray-500">{task.summary}</p>
         <div className="mt-1.5 flex items-center gap-3 text-[11px] text-gray-400">
+          {matter ? (
+            <span className="truncate text-gray-500">{matter.title}</span>
+          ) : null}
           {deadline && (
             <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-500 font-medium' : ''}`}>
               <Clock className="h-3 w-3" />
@@ -479,7 +490,7 @@ function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLik
         </div>
       </div>
 
-      {/* Quick actions — context-aware by status */}
+      {/* Quick actions - context-aware by status */}
       <div className={`flex items-center gap-1 ${isPending ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
         {isPending ? (
           <>
@@ -714,4 +725,3 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
     </Card>
   )
 }
-

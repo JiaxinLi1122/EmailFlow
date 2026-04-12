@@ -46,10 +46,10 @@ export async function POST(req: Request) {
       })
     }
 
-    const token = createToken({
-      userId: user.id,
-      email: user.email,
-    })
+    const token = createToken(
+      { userId: user.id, email: user.email },
+      !!rememberMe,
+    )
 
     await setSessionCookie(token, !!rememberMe)
 

@@ -1,7 +1,18 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.watchOptions = {
+        ...(config.watchOptions ?? {}),
+        poll: 1000,
+        aggregateTimeout: 300,
+        ignored: ['**/.git/**', '**/.next/**', '**/node_modules/**'],
+      }
+    }
 
-export default nextConfig;
+    return config
+  },
+}
+
+export default nextConfig

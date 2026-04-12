@@ -427,7 +427,7 @@ export default function EmailsPage() {
   )
 }
 
-/* ========== IDENTITY → PROJECT GROUPED EMAIL VIEW ========== */
+/* ========== IDENTITY -> PROJECT GROUPED EMAIL VIEW ========== */
 
 type ProjectGroup = {
   identityKey: string
@@ -548,7 +548,7 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
             {email.accountEmail && <AccountBadge account={email.accountEmail} />}
             {matter ? (
               <>
-                <span className="text-[10px] text-gray-300">•</span>
+                <span className="text-[10px] text-gray-300">&middot;</span>
                 <span className="truncate text-[11px] text-gray-400">{matter.title}</span>
               </>
             ) : null}
@@ -619,3 +619,5 @@ function formatDate(dateStr: string): string {
   }
   return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
 }
+
+
