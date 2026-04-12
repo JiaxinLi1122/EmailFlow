@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useCallback } from 'react'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 interface User {
   id: string
@@ -23,7 +24,7 @@ export function useAuth() {
       return json.user || null
     },
     retry: false,
-    staleTime: 5 * 60 * 1000,
+    staleTime: CACHE_TIME.auth,
   })
 
   const logout = useCallback(async () => {

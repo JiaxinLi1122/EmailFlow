@@ -22,6 +22,7 @@ import { useState, useEffect } from 'react'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import Link from 'next/link'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 interface ChecklistItem {
   id: string
@@ -165,6 +166,8 @@ export default function TaskDetailPage() {
   const { data: res, isLoading } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => fetch(`/api/tasks/${taskId}`).then((r) => r.json()),
+    staleTime: CACHE_TIME.detail,
+    placeholderData: (previous) => previous,
   })
 
   const task = res?.data

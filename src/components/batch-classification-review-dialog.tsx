@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type Props = {
   open: boolean
@@ -60,12 +61,14 @@ export function BatchClassificationReviewDialog({ open, onOpenChange, payload, o
     queryKey: ['identities'],
     queryFn: () => fetch('/api/identities').then((r) => r.json()),
     enabled: open,
+    staleTime: CACHE_TIME.taxonomy,
   })
 
   const { data: projectsRes } = useQuery({
     queryKey: ['projects'],
     queryFn: () => fetch('/api/projects').then((r) => r.json()),
     enabled: open,
+    staleTime: CACHE_TIME.taxonomy,
   })
 
   const existingIdentities = useMemo(() => ((identitiesRes?.data || []) as ExistingIdentity[]), [identitiesRes?.data])

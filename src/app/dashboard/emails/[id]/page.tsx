@@ -30,6 +30,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { EMAIL_CLASS_CONFIG, getEmailClassConfig } from '@/lib/email-classification'
 import { toast } from 'sonner'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type EmailTaskLink = {
   id: string
@@ -58,6 +59,8 @@ export default function EmailDetailPage() {
   const { data: res, isLoading } = useQuery({
     queryKey: ['email', emailId],
     queryFn: () => fetch(`/api/emails/${emailId}`).then((r) => r.json()),
+    staleTime: CACHE_TIME.detail,
+    placeholderData: (previous) => previous,
   })
 
   const email = res?.data

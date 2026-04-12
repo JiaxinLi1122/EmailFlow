@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/use-auth'
 import {
   DropdownMenu,
@@ -15,11 +15,13 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { BatchClassificationReviewDialog } from '@/components/batch-classification-review-dialog'
 import type { BatchClassificationReviewPayload } from '@/services/email-sync-service'
+import { isWorkspaceQueryKey } from '@/lib/query-cache'
 
 export function Header() {
   const { user, logout } = useAuth()
   const queryClient = useQueryClient()
   const pathname = usePathname()
+  const router = useRouter()
   const [reviewPayload, setReviewPayload] = useState<BatchClassificationReviewPayload | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
 
@@ -40,11 +42,14 @@ export function Header() {
     },
 
     onSuccess: async (data) => {
-      await queryClient.invalidateQueries({ queryKey: ['stats'] })
-      await queryClient.invalidateQueries({ queryKey: ['matters'] })
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      await queryClient.invalidateQueries({ queryKey: ['emails'] })
-      await queryClient.refetchQueries({ queryKey: ['stats'] })
+      await queryClient.invalidateQueries({
+        predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+      })
+      await queryClient.refetchQueries({
+        predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+        type: 'active',
+      })
+      router.refresh()
       const review = (data?.data?.review ?? null) as BatchClassificationReviewPayload | null
 
       if (review && review.items.length > 0) {
@@ -104,9 +109,14 @@ export function Header() {
         onOpenChange={setReviewOpen}
         payload={reviewPayload}
         onConfirmed={async () => {
-          await queryClient.invalidateQueries({ queryKey: ['matters'] })
-          await queryClient.invalidateQueries({ queryKey: ['tasks'] })
-          await queryClient.invalidateQueries({ queryKey: ['emails'] })
+          await queryClient.invalidateQueries({
+            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+          })
+          await queryClient.refetchQueries({
+            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+            type: 'active',
+          })
+          router.refresh()
           setReviewPayload(null)
         }}
       />

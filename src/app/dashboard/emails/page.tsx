@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
 import { getEmailClassConfig } from '@/lib/email-classification'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type Tab = 'actionable' | 'informational' | 'uncertain' | 'all'
 type EmailClassification = 'action' | 'awareness' | 'ignore' | 'uncertain'
@@ -100,6 +101,8 @@ export default function EmailsPage() {
     queryKey: ['emails', page],
     queryFn: () =>
       fetch(`/api/emails?page=${page}&limit=50`).then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
+    placeholderData: (previous) => previous,
   })
 
   const emails = useMemo(() => (res?.data || []) as EmailItem[], [res?.data])
@@ -440,14 +443,16 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
   const toggleIdentity = (id: string) =>
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 
   const toggleProject = (id: string) =>
     setCollapsedProjects((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 
@@ -677,5 +682,3 @@ function formatDate(dateStr: string): string {
   }
   return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
 }
-
-

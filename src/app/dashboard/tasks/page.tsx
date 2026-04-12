@@ -33,6 +33,7 @@ import { useRouter } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type ViewMode = 'list' | 'timeline' | 'calendar'
 type TaskStatus = 'pending' | 'confirmed' | 'completed' | 'dismissed'
@@ -115,6 +116,8 @@ export default function TasksPage() {
     queryKey: ['tasks', apiStatus, sortBy],
     queryFn: () =>
       fetch(`/api/tasks?status=${apiStatus}&sort=${sortBy}&limit=50`).then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
+    placeholderData: (previous) => previous,
   })
 
 

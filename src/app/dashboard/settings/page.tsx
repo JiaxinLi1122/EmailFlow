@@ -24,6 +24,7 @@ import {
   Unplug,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type CurrentUser = {
   email?: string | null
@@ -46,11 +47,13 @@ export default function SettingsPage() {
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
+    staleTime: CACHE_TIME.stats,
   })
 
   const { data: meRes } = useQuery({
     queryKey: ['auth-me'],
     queryFn: () => fetch('/api/auth/me').then((r) => r.json()),
+    staleTime: CACHE_TIME.auth,
   })
 
   const currentUser: CurrentUser | null = meRes?.user || meRes?.data || null

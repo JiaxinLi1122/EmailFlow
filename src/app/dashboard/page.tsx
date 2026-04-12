@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { getEmailClassConfig } from '@/lib/email-classification'
 import { useAuth } from '@/lib/use-auth'
+import { CACHE_TIME } from '@/lib/query-cache'
 
 type DashboardTask = {
   id: string
@@ -89,31 +90,37 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
+    staleTime: CACHE_TIME.stats,
   })
 
   const { data: confirmedRes } = useQuery({
     queryKey: ['tasks', 'confirmed'],
     queryFn: () => fetch('/api/tasks?status=confirmed&sort=priority&limit=5').then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
   })
 
   const { data: pendingRes } = useQuery({
     queryKey: ['tasks', 'pending'],
     queryFn: () => fetch('/api/tasks?status=pending&sort=priority&limit=5').then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
   })
 
   const { data: allTasksRes } = useQuery({
     queryKey: ['tasks', 'all-for-kpi'],
     queryFn: () => fetch('/api/tasks?limit=50').then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
   })
 
   const { data: emailsRes } = useQuery({
     queryKey: ['emails', 'for-dashboard'],
     queryFn: () => fetch('/api/emails?limit=50').then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
   })
 
   const { data: mattersRes } = useQuery({
     queryKey: ['matters', 'for-dashboard'],
     queryFn: () => fetch('/api/matters').then((r) => r.json()),
+    staleTime: CACHE_TIME.stats,
   })
 
   const s = stats?.data
