@@ -7,10 +7,9 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/page-header'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
-import { ContextGroupHeader } from '@/components/context-group-header'
 import {
   CheckSquare, Paperclip, Mail,
-  Search, CalendarIcon, X,
+  Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
@@ -427,46 +426,56 @@ export default function EmailsPage() {
   )
 }
 
-/* ========== IDENTITY -> PROJECT GROUPED EMAIL VIEW ========== */
+/* ========== 2-level collapsible: identity -> project ========== */
 
-type ProjectGroup = {
-  identityKey: string
-  identityName: string
-  projectKey: string
-  projectName: string
-  items: EmailItem[]
-}
+type EmailProjectGroup = { id: string; name: string; items: EmailItem[] }
+type EmailIdentityGroup = { id: string; name: string; projects: EmailProjectGroup[] }
 
 function EmailMatterView({ emails }: { emails: EmailItem[] }) {
-  const { projectGroups, ungrouped } = useMemo(() => {
+  const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+
+  const toggleIdentity = (id: string) =>
+    setCollapsedIdentities((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const toggleProject = (id: string) =>
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const { identityGroups, ungrouped } = useMemo(() => {
     const ungrouped: EmailItem[] = []
-    const projectMap = new Map<string, ProjectGroup>()
+    const identityMap = new Map<string, { name: string; projectMap: Map<string, { name: string; items: EmailItem[] }> }>()
 
     for (const email of emails) {
-      if (!email.project) {
-        ungrouped.push(email)
-        continue
-      }
-
-      const identityName = email.project.identity?.name || 'Unassigned Identity'
-      const identityKey = email.project.identity?.id || '__identity_unassigned__'
-      const projectName = email.project.name
-      const projectKey = email.project.id
-      const key = `${identityKey}::${projectKey}`
-
-      if (!projectMap.has(key)) {
-        projectMap.set(key, { identityKey, identityName, projectKey, projectName, items: [] })
-      }
-      projectMap.get(key)!.items.push(email)
+      if (!email.project) { ungrouped.push(email); continue }
+      const iId = email.project.identity?.id || '__unassigned__'
+      const iName = email.project.identity?.name || 'Unassigned'
+      const pId = email.project.id
+      const pName = email.project.name
+      if (!identityMap.has(iId)) identityMap.set(iId, { name: iName, projectMap: new Map() })
+      const identity = identityMap.get(iId)!
+      if (!identity.projectMap.has(pId)) identity.projectMap.set(pId, { name: pName, items: [] })
+      identity.projectMap.get(pId)!.items.push(email)
     }
 
-    const projectGroups = Array.from(projectMap.values()).sort((a, b) =>
-      a.identityName !== b.identityName
-        ? a.identityName.localeCompare(b.identityName)
-        : a.projectName.localeCompare(b.projectName)
-    )
+    const identityGroups: EmailIdentityGroup[] = Array.from(identityMap.entries())
+      .map(([id, { name, projectMap }]) => ({
+        id,
+        name,
+        projects: Array.from(projectMap.entries())
+          .map(([pid, { name, items }]) => ({ id: pid, name, items }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
 
-    return { projectGroups, ungrouped }
+    return { identityGroups, ungrouped }
   }, [emails])
 
   if (emails.length === 0) {
@@ -479,37 +488,82 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
     )
   }
 
-  const attentionCount = (emailList: EmailItem[]) =>
-    emailList.filter(
-      (e) => (e.classification === 'action' || e.classification === 'uncertain') && !((e.taskLinks?.length ?? 0) > 0)
+  const attentionCount = (list: EmailItem[]) =>
+    list.filter(
+      (e) => (e.classification === 'action' || e.classification === 'uncertain') && !(e.taskLinks?.length ?? 0)
     ).length
 
   return (
-    <div className="space-y-3">
-      {projectGroups.map((group) => (
-        <div key={`${group.identityKey}-${group.projectKey}`} className="space-y-3">
-          <ContextGroupHeader
-            identityName={group.identityName}
-            projectName={group.projectName}
-            attentionCount={attentionCount(group.items)}
-            detail={`${group.items.length} email${group.items.length !== 1 ? 's' : ''} in this project`}
-          />
-          <div className="space-y-2">
-            {group.items.map((email) => (
-              <EmailRow key={email.id} email={email} />
-            ))}
+    <div className="space-y-2">
+      {identityGroups.map((identity) => {
+        const isIdentityCollapsed = collapsedIdentities.has(identity.id)
+        const totalCount = identity.projects.reduce((s, p) => s + p.items.length, 0)
+        const totalAttention = identity.projects.reduce((s, p) => s + attentionCount(p.items), 0)
+        return (
+          <div key={identity.id} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+            {/* Identity row */}
+            <button
+              onClick={() => toggleIdentity(identity.id)}
+              className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+            >
+              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${isIdentityCollapsed ? '-rotate-90' : ''}`} />
+              <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">{identity.name}</span>
+              {totalAttention > 0 && (
+                <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600 ring-1 ring-red-100">
+                  {totalAttention} need action
+                </span>
+              )}
+              <span className="ml-auto text-xs text-slate-400">{totalCount} email{totalCount !== 1 ? 's' : ''}</span>
+            </button>
+
+            {!isIdentityCollapsed && (
+              <div className="divide-y divide-slate-100 border-t border-slate-100">
+                {identity.projects.map((project) => {
+                  const isProjectCollapsed = collapsedProjects.has(project.id)
+                  const projectAttention = attentionCount(project.items)
+                  return (
+                    <div key={project.id}>
+                      {/* Project row */}
+                      <button
+                        onClick={() => toggleProject(project.id)}
+                        className="flex w-full items-center gap-2.5 px-5 py-2.5 text-left transition-colors hover:bg-slate-50/70"
+                      >
+                        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform duration-150 ${isProjectCollapsed ? '-rotate-90' : ''}`} />
+                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span className="text-sm font-medium text-slate-700">{project.name}</span>
+                        {projectAttention > 0 && (
+                          <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">
+                            {projectAttention}
+                          </span>
+                        )}
+                        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length}</span>
+                      </button>
+
+                      {!isProjectCollapsed && (
+                        <div className="space-y-1.5 px-4 pb-3 pt-1">
+                          {project.items.map((email) => (
+                            <EmailRow key={email.id} email={email} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
+
       {ungrouped.length > 0 && (
-        <div className="space-y-3">
-          <ContextGroupHeader
-            identityName="Unassigned"
-            projectName="Uncategorized"
-            attentionCount={attentionCount(ungrouped)}
-            detail={`${ungrouped.length} email${ungrouped.length !== 1 ? 's' : ''}`}
-          />
-          <div className="space-y-2">
+        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+          <div className="flex items-center gap-2.5 px-4 py-3">
+            <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Uncategorized</span>
+            <span className="ml-auto text-xs text-slate-400">{ungrouped.length} email{ungrouped.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="space-y-1.5 border-t border-slate-100 px-4 pb-3 pt-2">
             {ungrouped.map((email) => (
               <EmailRow key={email.id} email={email} />
             ))}
