@@ -103,7 +103,62 @@ export async function findEmailsPaginated(
     prisma.email.count({ where }),
   ])
 
-  return { emails, total }
+  // Enrich with project + matter from ThreadMemory (best-effort)
+  try {
+    const threadIds = emails.map((e) => e.threadId).filter((id): id is string => !!id)
+    const ctxMap = threadIds.length
+      ? await buildThreadContextMap(userId, threadIds)
+      : new Map<string, { project: ProjectContext; matter: MatterTag }>()
+
+    const enriched = emails.map((email) => {
+      const ctx = email.threadId ? ctxMap.get(email.threadId) : null
+      return { ...email, project: ctx?.project ?? null, matter: ctx?.matter ?? null }
+    })
+
+    return { emails: enriched, total }
+  } catch (err) {
+    console.error('[email-repo] enrichment failed, returning emails without project context:', err)
+    return { emails, total }
+  }
+}
+
+type ProjectContext = {
+  id: string
+  name: string
+  identity: { id: string; name: string } | null
+} | null
+
+type MatterTag = { id: string; title: string } | null
+
+async function buildThreadContextMap(userId: string, threadIds: string[]) {
+  const threads = await prisma.threadMemory.findMany({
+    where: { userId, threadId: { in: threadIds } },
+    include: {
+      matter: {
+        include: {
+          projectContext: { include: { identity: true } },
+        },
+      },
+    },
+  })
+
+  return new Map(
+    threads.map((t) => [
+      t.threadId,
+      {
+        matter: t.matter ? { id: t.matter.id, title: t.matter.title } : null,
+        project: t.matter?.projectContext
+          ? {
+              id: t.matter.projectContext.id,
+              name: t.matter.projectContext.name,
+              identity: t.matter.projectContext.identity
+                ? { id: t.matter.projectContext.identity.id, name: t.matter.projectContext.identity.name }
+                : null,
+            }
+          : null,
+      },
+    ])
+  )
 }
 
 export async function findEmailById(userId: string, emailId: string) {

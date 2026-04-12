@@ -50,6 +50,17 @@ export async function createTask(data: CreateTaskData) {
   return task
 }
 
+export type ProjectContext = {
+  id: string
+  name: string
+  identity: { id: string; name: string } | null
+} | null
+
+export type MatterTag = {
+  id: string
+  title: string
+} | null
+
 export async function findTasksPaginated(
   userId: string,
   options: {
@@ -81,7 +92,7 @@ export async function findTasksPaginated(
         emailLinks: {
           include: {
             email: {
-              select: { id: true, subject: true, sender: true, receivedAt: true },
+              select: { id: true, subject: true, sender: true, receivedAt: true, threadId: true },
             },
           },
         },
@@ -90,7 +101,57 @@ export async function findTasksPaginated(
     prisma.task.count({ where }),
   ])
 
-  return { tasks, total }
+  // Enrich each task with project + matter from ThreadMemory (best-effort)
+  try {
+    const threadIds = tasks.flatMap((t) =>
+      t.emailLinks.map((l) => l.email?.threadId).filter((id): id is string => !!id)
+    )
+    const ctxMap = await buildThreadContextMap(userId, threadIds)
+
+    const enriched = tasks.map((task) => {
+      const threadId = task.emailLinks[0]?.email?.threadId ?? null
+      const ctx = threadId ? ctxMap.get(threadId) : null
+      return { ...task, project: ctx?.project ?? null, matter: ctx?.matter ?? null }
+    })
+
+    return { tasks: enriched, total }
+  } catch (err) {
+    console.error('[task-repo] enrichment failed, returning tasks without project context:', err)
+    return { tasks, total }
+  }
+}
+
+async function buildThreadContextMap(userId: string, threadIds: string[]) {
+  if (!threadIds.length) return new Map<string, { project: ProjectContext; matter: MatterTag }>()
+
+  const threads = await prisma.threadMemory.findMany({
+    where: { userId, threadId: { in: threadIds } },
+    include: {
+      matter: {
+        include: {
+          projectContext: { include: { identity: true } },
+        },
+      },
+    },
+  })
+
+  return new Map(
+    threads.map((t) => [
+      t.threadId,
+      {
+        matter: t.matter ? { id: t.matter.id, title: t.matter.title } : null,
+        project: t.matter?.projectContext
+          ? {
+              id: t.matter.projectContext.id,
+              name: t.matter.projectContext.name,
+              identity: t.matter.projectContext.identity
+                ? { id: t.matter.projectContext.identity.id, name: t.matter.projectContext.identity.name }
+                : null,
+            }
+          : null,
+      },
+    ])
+  )
 }
 
 export async function findTaskById(userId: string, taskId: string) {

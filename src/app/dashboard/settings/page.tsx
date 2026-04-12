@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/page-header'
 import {
   CalendarIcon,
   Clock3,
+  Globe,
   KeyRound,
   Loader2,
   Lock,
@@ -29,6 +30,7 @@ type CurrentUser = {
   gmailEmail?: string | null
   name?: string | null
   syncStartDate?: string | null
+  timezone?: string | null
 }
 
 const SYNC_PRESETS = [7, 15, 30] as const
@@ -39,6 +41,7 @@ export default function SettingsPage() {
   const [syncPickerOpen, setSyncPickerOpen] = useState(false)
   const [pendingDate, setPendingDate] = useState<Date | undefined>()
   const [todayMs] = useState(() => Date.now())
+  const [timezoneInput, setTimezoneInput] = useState<string | null>(null)
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -127,6 +130,27 @@ export default function SettingsPage() {
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Failed to update sync window')
+    },
+  })
+
+  const timezoneMutation = useMutation({
+    mutationFn: async (timezone: string) => {
+      const res = await fetch('/api/settings/timezone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || 'Failed to update timezone')
+      return json
+    },
+    onSuccess: () => {
+      toast.success('Timezone updated')
+      setTimezoneInput(null)
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to update timezone')
     },
   })
 
@@ -362,6 +386,53 @@ export default function SettingsPage() {
               After you change the sync window, run sync again to pull mail from the new range.
             </p>
           </InlineNotice>
+        </CardContent>
+      </Card>
+
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe className="h-4 w-4 text-blue-700" />
+            Timezone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-semibold text-gray-900">Daily digest timezone</p>
+              <p className="text-sm text-gray-500">
+                Your digest generates at 20:00 in this timezone. Use an IANA name like{' '}
+                <code className="rounded bg-gray-200 px-1 py-0.5 text-xs">Australia/Sydney</code> or{' '}
+                <code className="rounded bg-gray-200 px-1 py-0.5 text-xs">Asia/Shanghai</code>.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <input
+                type="text"
+                className="h-9 w-48 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 placeholder-gray-400 focus:border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-200"
+                placeholder={currentUser?.timezone || 'UTC'}
+                value={timezoneInput ?? ''}
+                onChange={(e) => setTimezoneInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && timezoneInput?.trim()) {
+                    timezoneMutation.mutate(timezoneInput.trim())
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                disabled={!timezoneInput?.trim() || timezoneMutation.isPending}
+                onClick={() => timezoneInput?.trim() && timezoneMutation.mutate(timezoneInput.trim())}
+              >
+                {timezoneMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+              </Button>
+            </div>
+          </div>
+          {currentUser?.timezone && (
+            <p className="text-xs text-gray-400">
+              Current timezone: <span className="font-medium text-gray-600">{currentUser.timezone}</span>
+            </p>
+          )}
         </CardContent>
       </Card>
 

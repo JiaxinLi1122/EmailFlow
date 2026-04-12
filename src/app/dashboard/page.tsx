@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -9,11 +9,13 @@ import {
   BarChart3,
   CheckSquare,
   Clock,
+  FolderOpen,
   Loader2,
   Mail,
   PieChart,
   Target,
   TrendingUp,
+  UserRound,
 } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
@@ -42,6 +44,20 @@ type DashboardEmail = {
   sender?: string | null
   classification?: string | null
   taskLinks?: Array<unknown>
+}
+
+type DashboardMatter = {
+  id: string
+  title: string
+  lastMessageAt?: string | null
+  project?: {
+    id: string
+    name: string
+    identity?: {
+      id: string
+      name: string
+    } | null
+  } | null
 }
 
 export default function DashboardPage() {
@@ -95,11 +111,17 @@ export default function DashboardPage() {
     queryFn: () => fetch('/api/emails?limit=50').then((r) => r.json()),
   })
 
+  const { data: mattersRes } = useQuery({
+    queryKey: ['matters', 'for-dashboard'],
+    queryFn: () => fetch('/api/matters').then((r) => r.json()),
+  })
+
   const s = stats?.data
   const confirmedTasks = confirmedRes?.data || []
   const pendingTasks = pendingRes?.data || []
   const allTasks: DashboardTask[] = allTasksRes?.data || []
   const allEmails: DashboardEmail[] = emailsRes?.data || []
+  const matters = useMemo(() => ((mattersRes?.data || []) as DashboardMatter[]), [mattersRes?.data])
 
   const totalTasks = s?.tasks?.total || 0
   const completedTasks = s?.tasks?.completed || 0
@@ -133,6 +155,36 @@ export default function DashboardPage() {
   const actionToTask = emailData.action > 0
     ? Math.round((totalTasks / emailData.action) * 100)
     : 0
+
+  const activeIdentities = useMemo(() => {
+    const counts = new Map<string, { name: string; count: number }>()
+    for (const matter of matters) {
+      const identity = matter.project?.identity
+      if (!identity) continue
+      const current = counts.get(identity.id) ?? { name: identity.name, count: 0 }
+      current.count += 1
+      counts.set(identity.id, current)
+    }
+    return Array.from(counts.values()).sort((a, b) => b.count - a.count).slice(0, 4)
+  }, [matters])
+
+  const activeProjects = useMemo(() => {
+    const counts = new Map<string, { id: string; name: string; count: number; lastActivity: number }>()
+    for (const matter of matters) {
+      const project = matter.project
+      if (!project) continue
+      const existing = counts.get(project.id) ?? {
+        id: project.id,
+        name: project.name,
+        count: 0,
+        lastActivity: 0,
+      }
+      existing.count += 1
+      existing.lastActivity = Math.max(existing.lastActivity, matter.lastMessageAt ? new Date(matter.lastMessageAt).getTime() : 0)
+      counts.set(project.id, existing)
+    }
+    return Array.from(counts.values()).sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 5)
+  }, [matters])
 
   return (
     <div className="space-y-6">
@@ -271,6 +323,66 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {(activeIdentities.length > 0 || activeProjects.length > 0) && (
+        <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="border-gray-200/80 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <UserRound className="h-4 w-4 text-blue-600" />
+                Active Identities
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {activeIdentities.length === 0 ? (
+                <p className="text-sm text-gray-400">No identity groupings yet.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {activeIdentities.map((identity) => (
+                    <div key={identity.name} className="flex items-center justify-between py-3 first:pt-1 last:pb-1">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">{identity.name}</p>
+                        <p className="text-xs text-slate-500">Role context inferred from recent matter activity</p>
+                      </div>
+                      <span className="text-xs font-medium text-slate-500">{identity.count} matters</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200/80 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <FolderOpen className="h-4 w-4 text-blue-600" />
+                Active Projects
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {activeProjects.length === 0 ? (
+                <p className="text-sm text-gray-400">No project groupings yet.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {activeProjects.map((project) => (
+                    <Link
+                      key={project.id}
+                      href="/dashboard/tasks"
+                      className="flex items-center justify-between py-3 transition-colors first:pt-1 last:pb-1 hover:text-blue-700"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">{project.name}</p>
+                        <p className="text-xs text-slate-500">Recently active grouped project context</p>
+                      </div>
+                      <span className="text-xs font-medium text-slate-500">{project.count} matters</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {(pendingTasks.length > 0 || attentionEmails.length > 0) && (
         <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -533,4 +645,3 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
-

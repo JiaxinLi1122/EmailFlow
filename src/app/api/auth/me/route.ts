@@ -30,6 +30,7 @@ export async function GET() {
         name: true,
         gmailEmail: true,
         syncStartDate: true,
+        timezone: true,
       },
     })
 
@@ -48,6 +49,7 @@ export async function GET() {
         name: user.name,
         gmailEmail: user.gmailEmail,
         syncStartDate: user.syncStartDate,
+        timezone: user.timezone,
       },
     })
   } catch (err) {

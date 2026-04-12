@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { ThreadMemory } from './thread-memory-repo'
+import type { ProjectContext } from './project-context-repo'
 
 // ============================================================
 // Matter Memory Repository
@@ -15,6 +16,7 @@ import type { ThreadMemory } from './thread-memory-repo'
 export type MatterMemory = {
   id: string
   userId: string
+  projectContextId: string | null
   title: string
   topic: string
   summary: string
@@ -30,6 +32,7 @@ export type MatterMemory = {
   keywords: string[]
   createdAt: Date
   updatedAt: Date
+  projectContext: ProjectContext | null
 }
 
 // ── Candidate discovery ───────────────────────────────────────
@@ -91,7 +94,10 @@ export async function findCandidates(
 // ── Reads ─────────────────────────────────────────────────────
 
 export async function findById(matterId: string): Promise<MatterMemory | null> {
-  const raw = await prisma.matterMemory.findUnique({ where: { id: matterId } })
+  const raw = await prisma.matterMemory.findUnique({
+    where: { id: matterId },
+    include: { projectContext: { include: { identity: true } } },
+  })
   return raw ? mapRow(raw) : null
 }
 
@@ -120,6 +126,7 @@ export async function createFromThread(
       threadCount: 1,
       emailCount: 1, // the email that triggered this creation
     },
+    include: { projectContext: { include: { identity: true } } },
   }))
 }
 
@@ -150,6 +157,7 @@ export async function updateFromThread(
       participants: mergedParticipants,
       emailCount: { increment: 1 },
     },
+    include: { projectContext: { include: { identity: true } } },
   }))
 }
 
@@ -181,6 +189,7 @@ export async function mergeThread(
       threadCount: { increment: 1 },
       emailCount: { increment: 1 },
     },
+    include: { projectContext: { include: { identity: true } } },
   }))
 }
 
@@ -194,6 +203,19 @@ export async function linkPrimaryTask(matterId: string, taskId: string): Promise
   })
 }
 
+export async function setProjectContext(
+  matterId: string,
+  projectContextId: string
+): Promise<MatterMemory> {
+  const row = await prisma.matterMemory.update({
+    where: { id: matterId },
+    data: { projectContextId },
+    include: { projectContext: { include: { identity: true } } },
+  })
+
+  return mapRow(row)
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function asStringArray(v: unknown): string[] {
@@ -201,13 +223,69 @@ function asStringArray(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === 'string')
 }
 
-// Prisma returns Json columns as JsonValue; map them to typed fields at the boundary.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapRow(raw: any): MatterMemory {
+function mapRow(raw: {
+  id: string
+  userId: string
+  projectContextId: string | null
+  title: string
+  topic: string
+  summary: string
+  status: string
+  nextAction: string | null
+  linkedPrimaryTaskId: string | null
+  lastEmailId: string | null
+  lastMessageAt: Date | null
+  threadCount: number
+  emailCount: number
+  lastClassification: string | null
+  participants: unknown
+  keywords: unknown
+  createdAt: Date
+  updatedAt: Date
+  projectContext?: {
+    id: string
+    userId: string
+    identityId: string | null
+    name: string
+    description: string | null
+    status: string
+    keywords: unknown
+    participants: unknown
+    confidence: number
+    createdAt: Date
+    updatedAt: Date
+    identity: {
+      id: string
+      userId: string
+      name: string
+      description: string | null
+      status: string
+      keywords: unknown
+      hints: unknown
+      confidence: number
+      createdAt: Date
+      updatedAt: Date
+    } | null
+  } | null
+}): MatterMemory {
   return {
     ...raw,
     participants: asStringArray(raw.participants),
     keywords: asStringArray(raw.keywords),
+    projectContext: raw.projectContext
+      ? {
+          ...raw.projectContext,
+          keywords: asStringArray(raw.projectContext.keywords),
+          participants: asStringArray(raw.projectContext.participants),
+          identity: raw.projectContext.identity
+            ? {
+                ...raw.projectContext.identity,
+                keywords: asStringArray(raw.projectContext.identity.keywords),
+                hints: asStringArray(raw.projectContext.identity.hints),
+              }
+            : null,
+        }
+      : null,
   }
 }
 

@@ -15,6 +15,11 @@ export async function GET() {
       where: { userId: user.id },
       orderBy: { lastMessageAt: 'desc' },
       include: {
+        projectContext: {
+          include: {
+            identity: true,
+          },
+        },
         threads: {
           select: {
             threadId: true,
@@ -35,6 +40,20 @@ export async function GET() {
       threadCount: m.threadCount,
       emailCount: m.emailCount,
       lastMessageAt: m.lastMessageAt,
+      project: m.projectContext
+        ? {
+            id: m.projectContext.id,
+            name: m.projectContext.name,
+            confidence: m.projectContext.confidence,
+            identity: m.projectContext.identity
+              ? {
+                  id: m.projectContext.identity.id,
+                  name: m.projectContext.identity.name,
+                  confidence: m.projectContext.identity.confidence,
+                }
+              : null,
+          }
+        : null,
       // All Gmail threadIds belonging to this matter (for email grouping)
       threadIds: m.threads.map((t) => t.threadId),
       // All task IDs linked to threads in this matter (for task grouping)

@@ -34,6 +34,8 @@ model User {
   emails  Email[]
   tasks   Task[]
   digests Digest[]
+  identities UserIdentity[]
+  projects   ProjectContext[]
 
   accounts             Account[]
   sessions             Session[]
@@ -181,6 +183,7 @@ model SenderMemory {
 model MatterMemory {
   id     String @id @default(cuid())
   userId String
+  projectContextId String?
 
   title      String // cleaned, specific matter title
   topic      String @default("other") // meeting | invoice | project_update | support | application | approval | deadline | other
@@ -201,7 +204,49 @@ model MatterMemory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  projectContext ProjectContext? @relation(fields: [projectContextId], references: [id])
   threads ThreadMemory[] // threads that belong to this matter
+}
+
+model UserIdentity {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  status      String   @default("active")
+  keywords    Json     @default("[]")
+  hints       Json     @default("[]")
+  confidence  Float    @default(1.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects ProjectContext[]
+
+  @@index([userId])
+  @@unique([userId, name])
+}
+
+model ProjectContext {
+  id           String   @id @default(cuid())
+  userId       String
+  identityId   String?
+  name         String
+  description  String?
+  status       String   @default("active")
+  keywords     Json     @default("[]")
+  participants Json     @default("[]")
+  confidence   Float    @default(1.0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identity  UserIdentity? @relation(fields: [identityId], references: [id])
+  matters   MatterMemory[]
+
+  @@index([userId])
+  @@index([identityId])
+  @@unique([userId, name])
 }
 
 model ThreadMemory {

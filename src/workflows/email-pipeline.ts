@@ -4,8 +4,12 @@ import * as emailRepo from '@/repositories/email-repo'
 import * as taskRepo from '@/repositories/task-repo'
 import * as threadMemoryRepo from '@/repositories/thread-memory-repo'
 import * as matterMemoryRepo from '@/repositories/matter-memory-repo'
+import * as identityRepo from '@/repositories/identity-repo'
+import * as projectContextRepo from '@/repositories/project-context-repo'
 import type { ThreadMemory } from '@/repositories/thread-memory-repo'
 import type { MatterMemory } from '@/repositories/matter-memory-repo'
+import type { UserIdentity } from '@/repositories/identity-repo'
+import type { ProjectContext } from '@/repositories/project-context-repo'
 import { prisma } from '@/lib/prisma'
 
 // ============================================================
@@ -25,6 +29,25 @@ import { prisma } from '@/lib/prisma'
 // Confidence threshold for accepting an AI matter match.
 // Below this value we always create a new matter.
 const MATTER_MATCH_THRESHOLD = 0.85
+const PROJECT_REVIEW_THRESHOLD = 0.9
+const IDENTITY_REVIEW_THRESHOLD = 0.9
+
+export interface ReviewSuggestion {
+  id: string
+  name: string
+  isNew: boolean
+  confidence: number
+  reason?: string
+}
+
+export interface PipelineReviewCandidate {
+  emailId: string
+  taskId?: string
+  matterId?: string
+  matterTitle: string
+  project: ReviewSuggestion | null
+  identity: ReviewSuggestion | null
+}
 
 export interface PipelineResult {
   emailId: string
@@ -33,6 +56,7 @@ export interface PipelineResult {
   taskCreated: boolean
   taskId?: string
   skippedByRule: boolean
+  reviewCandidate?: PipelineReviewCandidate
 }
 
 // ── Step 0: Rule-based pre-filter ────────────────────────────
@@ -113,6 +137,12 @@ async function buildMemoryContext(
     if (matterMemory.threadCount > 1) {
       lines.push(`- This matter spans ${matterMemory.threadCount} email thread(s).`)
     }
+    if (matterMemory.projectContext) {
+      lines.push(`- Project: ${matterMemory.projectContext.name}`)
+      if (matterMemory.projectContext.identity) {
+        lines.push(`- Identity: ${matterMemory.projectContext.identity.name}`)
+      }
+    }
   } else if (threadMemory) {
     // Fall back to thread context when matter not yet known
     lines.push('')
@@ -134,6 +164,187 @@ async function buildMemoryContext(
   lines.push('')
 
   return lines.join('\n')
+}
+
+type AssignmentResult = {
+  matter: MatterMemory
+  project: ProjectContext | null
+  projectIsNew: boolean
+  projectReason?: string
+  identity: UserIdentity | null
+  identityIsNew: boolean
+  identityReason?: string
+}
+
+function normalizeLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractSignalKeywords(...values: string[]): string[] {
+  const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'your', 'about', 'this', 'that', 'have'])
+
+  return [...new Set(
+    values
+      .flatMap((value) => normalizeLabel(value).split(' '))
+      .map((part) => part.trim())
+      .filter((part) => part.length >= 3 && !stopWords.has(part))
+  )]
+}
+
+function scoreOverlap(haystack: string[], needles: string[]): number {
+  if (haystack.length === 0 || needles.length === 0) return 0
+  const hay = new Set(haystack.map(normalizeLabel))
+  const matches = needles.filter((needle) => hay.has(normalizeLabel(needle))).length
+  return matches / Math.max(needles.length, 1)
+}
+
+function inferIdentityName(input: { sender: string; matter: MatterMemory }): string {
+  const sender = input.sender.toLowerCase()
+  const text = `${input.matter.title} ${input.matter.summary} ${input.matter.topic}`.toLowerCase()
+
+  if (/\b(course|class|semester|professor|assignment|campus|university|lecture|thesis|supervisor)\b/.test(text)) {
+    return 'Student'
+  }
+
+  if (/\b(startup|product|launch|roadmap|fundraising|founder|investor|mvp)\b/.test(text)) {
+    return 'Founder'
+  }
+
+  if (/\b(family|rent|medical|doctor|house|home|insurance)\b/.test(text)) {
+    return 'Life Admin'
+  }
+
+  if (sender.includes('.edu')) {
+    return 'Student'
+  }
+
+  return 'Work'
+}
+
+async function stepAssignProjectAndIdentity(
+  userId: string,
+  email: { sender: string },
+  matter: MatterMemory
+): Promise<AssignmentResult> {
+  let currentMatter = matter
+  let project = matter.projectContext
+  let projectIsNew = false
+  let projectReason: string | undefined
+  let identity = project?.identity ?? null
+  let identityIsNew = false
+  let identityReason: string | undefined
+
+  const matterKeywords = extractSignalKeywords(matter.title, matter.summary, matter.topic, ...matter.keywords)
+
+  if (!project) {
+    const allProjects = await projectContextRepo.findAllForUser(userId)
+    const bestProject = allProjects
+      .map((candidate) => {
+        const nameScore = normalizeLabel(candidate.name) === normalizeLabel(matter.title) ? 1 : 0
+        const keywordScore = scoreOverlap(candidate.keywords, matterKeywords)
+        const participantScore = scoreOverlap(candidate.participants, matter.participants)
+        const score = nameScore * 0.6 + keywordScore * 0.25 + participantScore * 0.15
+        return { candidate, score }
+      })
+      .sort((a, b) => b.score - a.score)[0]
+
+    if (bestProject && bestProject.score >= 0.78) {
+      currentMatter = await matterMemoryRepo.setProjectContext(matter.id, bestProject.candidate.id)
+      project = bestProject.candidate
+      identity = bestProject.candidate.identity
+      projectReason = `Matched existing project by title, keyword, and participant overlap (${Math.round(bestProject.score * 100)}%).`
+    } else {
+      project = await projectContextRepo.createSuggestion(userId, {
+        name: matter.title,
+        description: matter.summary,
+        keywords: matterKeywords,
+        participants: matter.participants,
+        confidence: bestProject ? Math.max(0.62, bestProject.score) : 0.72,
+      })
+      currentMatter = await matterMemoryRepo.setProjectContext(matter.id, project.id)
+      projectIsNew = true
+      projectReason = bestProject
+        ? `Suggested a new project because the best existing match only reached ${Math.round(bestProject.score * 100)}% overlap.`
+        : 'Suggested a new project because no similar existing project was found.'
+    }
+  }
+
+  if (project && !identity) {
+    const allIdentities = await identityRepo.findAllForUser(userId)
+    const inferredName = inferIdentityName({ sender: email.sender, matter: currentMatter })
+    const matchingIdentity = allIdentities.find((candidate) => normalizeLabel(candidate.name) === normalizeLabel(inferredName))
+
+    if (matchingIdentity) {
+      identity = matchingIdentity
+      project = await projectContextRepo.assignIdentity(project.id, matchingIdentity.id)
+      identityReason = `Matched existing identity from sender and matter language: ${inferredName}.`
+    } else {
+      identity = await identityRepo.createSuggestion(userId, {
+        name: inferredName,
+        description: `Suggested from matter "${currentMatter.title}"`,
+        keywords: matterKeywords,
+        hints: [email.sender],
+        confidence: 0.74,
+      })
+      project = await projectContextRepo.assignIdentity(project.id, identity.id)
+      identityIsNew = true
+      identityReason = `Suggested a new identity from sender and matter language: ${inferredName}.`
+    }
+  }
+
+  return {
+    matter: currentMatter,
+    project,
+    projectIsNew,
+    projectReason,
+    identity,
+    identityIsNew,
+    identityReason,
+  }
+}
+
+function buildReviewCandidate(
+  emailId: string,
+  matter: MatterMemory,
+  assignment: AssignmentResult,
+  taskId?: string
+): PipelineReviewCandidate | undefined {
+  const shouldReview =
+    assignment.projectIsNew ||
+    assignment.identityIsNew ||
+    (assignment.project?.confidence ?? 1) < PROJECT_REVIEW_THRESHOLD ||
+    (assignment.identity?.confidence ?? 1) < IDENTITY_REVIEW_THRESHOLD
+
+  if (!shouldReview) return undefined
+
+  return {
+    emailId,
+    taskId,
+    matterId: matter.id,
+    matterTitle: matter.title,
+    project: assignment.project
+      ? {
+          id: assignment.project.id,
+          name: assignment.project.name,
+          isNew: assignment.projectIsNew,
+          confidence: assignment.project.confidence,
+          reason: assignment.projectReason,
+        }
+      : null,
+    identity: assignment.identity
+      ? {
+          id: assignment.identity.id,
+          name: assignment.identity.name,
+          isNew: assignment.identityIsNew,
+          confidence: assignment.identity.confidence,
+          reason: assignment.identityReason,
+        }
+      : null,
+  }
 }
 
 // ── Step 1: Classify ─────────────────────────────────────────
@@ -429,6 +640,7 @@ export async function processEmail(
   let currentThreadMemory: ThreadMemory | null = existingThreadMemory
   let currentMatterMemory: MatterMemory | null = existingMatterMemory
   let currentMemoryContext = memoryContext
+  let reviewCandidate: PipelineReviewCandidate | undefined
 
   // ── 4. Ignore: no thread memory, no matter matching ────────
   if (classification.category === 'ignore') {
@@ -466,6 +678,9 @@ export async function processEmail(
 
       // ── 6. Match or create matter (action only) ──────────
       currentMatterMemory = await stepMatchOrCreateMatter(userId, currentThreadMemory, threadId)
+      const assignment = await stepAssignProjectAndIdentity(userId, email, currentMatterMemory)
+      currentMatterMemory = assignment.matter
+      reviewCandidate = buildReviewCandidate(email.id, currentMatterMemory, assignment)
     }
   }
 
@@ -505,6 +720,7 @@ export async function processEmail(
       taskCreated: false,
       taskId: existingTaskId,
       skippedByRule: false,
+      reviewCandidate,
     }
   }
 
@@ -531,6 +747,7 @@ export async function processEmail(
       taskCreated: false,
       taskId: existingTaskId,
       skippedByRule: false,
+      reviewCandidate,
     }
   }
 
@@ -557,6 +774,10 @@ export async function processEmail(
     await matterMemoryRepo.linkPrimaryTask(currentMatterMemory.id, task.id)
   }
 
+  if (reviewCandidate) {
+    reviewCandidate.taskId = task.id
+  }
+
   return {
     emailId: email.id,
     classification: classification.category,
@@ -564,5 +785,6 @@ export async function processEmail(
     taskCreated: true,
     taskId: task.id,
     skippedByRule: false,
+    reviewCandidate,
   }
 }

@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/page-header'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
+import { ContextGroupHeader } from '@/components/context-group-header'
 import {
-  AlertTriangle, CheckSquare, Paperclip, Mail,
-  Search, CalendarIcon, X, ChevronDown, FolderOpen,
+  CheckSquare, Paperclip, Mail,
+  Search, CalendarIcon, X,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
@@ -42,16 +43,8 @@ type EmailItem = {
   accountEmail?: string | null
   hasAttachments?: boolean | null
   threadId?: string | null
-}
-
-type MatterItem = {
-  id: string
-  title: string
-  status: string
-  topic: string
-  summary?: string | null
-  lastMessageAt?: string | null
-  threadIds: string[]
+  project?: { id: string; name: string; identity: { id: string; name: string } | null } | null
+  matter?: { id: string; title: string } | null
 }
 
 type QueryMeta = {
@@ -110,11 +103,6 @@ export default function EmailsPage() {
       fetch(`/api/emails?page=${page}&limit=50`).then((r) => r.json()),
   })
 
-  const { data: mattersRes } = useQuery({
-    queryKey: ['matters'],
-    queryFn: () => fetch('/api/matters').then((r) => r.json()),
-  })
-  const matters = useMemo(() => (mattersRes?.data || []) as MatterItem[], [mattersRes?.data])
   const emails = useMemo(() => (res?.data || []) as EmailItem[], [res?.data])
   const meta = (res as QueryResponse<EmailItem[]>)?.meta
 
@@ -391,6 +379,7 @@ export default function EmailsPage() {
                 ]}
               />
             )}
+
           </div>
         </div>
       </div>
@@ -409,7 +398,7 @@ export default function EmailsPage() {
           description={searchQuery ? 'Try adjusting your keywords or filters.' : 'Change the current filters to see more mail.'}
         />
       ) : (
-        <EmailMatterView emails={filtered} matters={matters} />
+        <EmailMatterView emails={filtered} />
       )}
 
       {/* Pagination */}
@@ -438,73 +427,47 @@ export default function EmailsPage() {
   )
 }
 
-/* ========== MATTER-GROUPED EMAIL VIEW ========== */
-const EMAIL_STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-100 text-blue-700',
-  pending: 'bg-yellow-100 text-yellow-700',
-  waiting_reply: 'bg-orange-100 text-orange-700',
-  completed: 'bg-green-100 text-green-700',
-}
-const EMAIL_TOPIC_LABELS: Record<string, string> = {
-  meeting: 'Meeting', invoice: 'Invoice', project_update: 'Project',
-  support: 'Support', application: 'Application', approval: 'Approval',
-  deadline: 'Deadline', other: 'Other',
+/* ========== IDENTITY → PROJECT GROUPED EMAIL VIEW ========== */
+
+type ProjectGroup = {
+  identityKey: string
+  identityName: string
+  projectKey: string
+  projectName: string
+  items: EmailItem[]
 }
 
-function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: MatterItem[] }) {
-  // Build threadId → matter map
-  const threadToMatter = useMemo(() => {
-    const map = new Map<string, MatterItem>()
-    for (const matter of matters) {
-      for (const tid of matter.threadIds) {
-        map.set(tid, matter)
-      }
-    }
-    return map
-  }, [matters])
-
-  // Group emails by matter
-  const { matterGroups, ungrouped } = useMemo(() => {
-    const grouped = new Map<string, { matter: MatterItem; emails: EmailItem[] }>()
+function EmailMatterView({ emails }: { emails: EmailItem[] }) {
+  const { projectGroups, ungrouped } = useMemo(() => {
     const ungrouped: EmailItem[] = []
+    const projectMap = new Map<string, ProjectGroup>()
+
     for (const email of emails) {
-      const matter = email.threadId ? threadToMatter.get(email.threadId) : null
-      if (matter) {
-        if (!grouped.has(matter.id)) grouped.set(matter.id, { matter, emails: [] })
-        grouped.get(matter.id)!.emails.push(email)
-      } else {
+      if (!email.project) {
         ungrouped.push(email)
+        continue
       }
+
+      const identityName = email.project.identity?.name || 'Unassigned Identity'
+      const identityKey = email.project.identity?.id || '__identity_unassigned__'
+      const projectName = email.project.name
+      const projectKey = email.project.id
+      const key = `${identityKey}::${projectKey}`
+
+      if (!projectMap.has(key)) {
+        projectMap.set(key, { identityKey, identityName, projectKey, projectName, items: [] })
+      }
+      projectMap.get(key)!.items.push(email)
     }
-    const needsAttn = (emailList: EmailItem[]) =>
-      emailList.filter(
-        (e) => (e.classification === 'action' || e.classification === 'uncertain') && !((e.taskLinks?.length ?? 0) > 0)
-      ).length
 
-    const groups = Array.from(grouped.values()).sort((a, b) => {
-      // Matters with attention emails come first
-      const aAttn = needsAttn(a.emails)
-      const bAttn = needsAttn(b.emails)
-      if (bAttn !== aAttn) return bAttn - aAttn
-      // Then by most recent activity
-      const at = a.matter.lastMessageAt ? new Date(a.matter.lastMessageAt).getTime() : 0
-      const bt = b.matter.lastMessageAt ? new Date(b.matter.lastMessageAt).getTime() : 0
-      return bt - at
-    })
-    return { matterGroups: groups, ungrouped }
-  }, [emails, threadToMatter])
+    const projectGroups = Array.from(projectMap.values()).sort((a, b) =>
+      a.identityName !== b.identityName
+        ? a.identityName.localeCompare(b.identityName)
+        : a.projectName.localeCompare(b.projectName)
+    )
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
+    return { projectGroups, ungrouped }
+  }, [emails])
 
   if (emails.length === 0) {
     return (
@@ -523,92 +486,36 @@ function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: Ma
 
   return (
     <div className="space-y-3">
-      {matterGroups.map(({ matter, emails: mEmails }) => {
-        const attn = attentionCount(mEmails)
-        const isOpen = !collapsed.has(matter.id)
-        return (
-          <div
-            key={matter.id}
-            className={`overflow-hidden rounded-2xl border bg-white/95 shadow-sm transition-shadow ${
-              attn > 0 ? 'border-red-200' : 'border-gray-200/80 hover:border-blue-200/80 hover:shadow-md'
-            }`}
-          >
-            <button
-              onClick={() => toggle(matter.id)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-blue-50/60"
-            >
-              <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${isOpen ? '' : '-rotate-90'}`} />
-              <FolderOpen className={`h-4 w-4 shrink-0 ${attn > 0 ? 'text-red-400' : 'text-blue-400'}`} />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-sm text-gray-900">{matter.title}</span>
-                  {attn > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
-                      <AlertTriangle className="h-3 w-3" />
-                      {attn} need{attn === 1 ? 's' : ''} attention
-                    </span>
-                  )}
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${EMAIL_STATUS_COLORS[matter.status] || 'bg-gray-100 text-gray-500'}`}>
-                    {matter.status.replace('_', ' ')}
-                  </span>
-                  <span className="text-[10px] font-medium text-gray-400">
-                    {EMAIL_TOPIC_LABELS[matter.topic] || matter.topic}
-                  </span>
-                </div>
-                {matter.summary && (
-                  <p className="mt-0.5 truncate text-xs text-gray-400">{matter.summary}</p>
-                )}
-              </div>
-              <span className="ml-2 shrink-0 text-xs text-gray-400">
-                {mEmails.length} email{mEmails.length !== 1 ? 's' : ''}
-              </span>
-            </button>
-            {isOpen && (
-              <div className="space-y-2 border-t border-gray-100 bg-blue-50/30 px-3 pb-3 pt-2">
-                {mEmails.map((email) => (
-                  <EmailRow key={email.id} email={email} />
-                ))}
-              </div>
-            )}
+      {projectGroups.map((group) => (
+        <div key={`${group.identityKey}-${group.projectKey}`} className="space-y-3">
+          <ContextGroupHeader
+            identityName={group.identityName}
+            projectName={group.projectName}
+            attentionCount={attentionCount(group.items)}
+            detail={`${group.items.length} email${group.items.length !== 1 ? 's' : ''} in this project`}
+          />
+          <div className="space-y-2">
+            {group.items.map((email) => (
+              <EmailRow key={email.id} email={email} />
+            ))}
           </div>
-        )
-      })}
-      {ungrouped.length > 0 && (() => {
-        const attn = attentionCount(ungrouped)
-        const isOpen = !collapsed.has('__ungrouped__')
-        return (
-          <div
-            className={`overflow-hidden rounded-2xl border bg-white/95 shadow-sm transition-shadow ${
-              attn > 0 ? 'border-red-200' : 'border-gray-200/80 hover:border-blue-200/80 hover:shadow-md'
-            }`}
-          >
-            <button
-              onClick={() => toggle('__ungrouped__')}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-blue-50/60"
-            >
-              <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${isOpen ? '' : '-rotate-90'}`} />
-              <FolderOpen className="h-4 w-4 shrink-0 text-gray-300" />
-              <span className="flex-1 font-semibold text-sm text-gray-500">Uncategorized</span>
-              {attn > 0 && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
-                  <AlertTriangle className="h-3 w-3" />
-                  {attn} need{attn === 1 ? 's' : ''} attention
-                </span>
-              )}
-              <span className="ml-2 shrink-0 text-xs text-gray-400">
-                {ungrouped.length} email{ungrouped.length !== 1 ? 's' : ''}
-              </span>
-            </button>
-            {isOpen && (
-              <div className="space-y-2 border-t border-gray-100 bg-blue-50/30 px-3 pb-3 pt-2">
-                {ungrouped.map((email) => (
-                  <EmailRow key={email.id} email={email} />
-                ))}
-              </div>
-            )}
+        </div>
+      ))}
+      {ungrouped.length > 0 && (
+        <div className="space-y-3">
+          <ContextGroupHeader
+            identityName="Unassigned"
+            projectName="Uncategorized"
+            attentionCount={attentionCount(ungrouped)}
+            detail={`${ungrouped.length} email${ungrouped.length !== 1 ? 's' : ''}`}
+          />
+          <div className="space-y-2">
+            {ungrouped.map((email) => (
+              <EmailRow key={email.id} email={email} />
+            ))}
           </div>
-        )
-      })()}
+        </div>
+      )}
     </div>
   )
 }
@@ -616,6 +523,7 @@ function EmailMatterView({ emails, matters }: { emails: EmailItem[]; matters: Ma
 
 /* ========== EMAIL ROW - shows linked tasks as badges ========== */
 function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
+  const matter = email.matter ?? null
   const linkedTasks = email.taskLinks?.map((link) => link.task).filter((t): t is LinkedTask => t != null) || []
   const needsAttention =
     (email.classification === 'action' || email.classification === 'uncertain') &&
@@ -638,6 +546,12 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
           <div className="flex items-center gap-2 mt-0.5">
             <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
             {email.accountEmail && <AccountBadge account={email.accountEmail} />}
+            {matter ? (
+              <>
+                <span className="text-[10px] text-gray-300">•</span>
+                <span className="truncate text-[11px] text-gray-400">{matter.title}</span>
+              </>
+            ) : null}
           </div>
         </div>
         <span className="flex-shrink-0 text-xs text-gray-400">{formatDate(email.receivedAt)}</span>
@@ -705,5 +619,3 @@ function formatDate(dateStr: string): string {
   }
   return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
 }
-
-

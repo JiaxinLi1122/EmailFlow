@@ -6,12 +6,27 @@ import { createDailyDigest } from '@/workflows/digest-pipeline'
 
 // ============================================================
 // Cron: Daily Digest Generator
-// Runs at 20:00 AEST (10:00 UTC) every day via Vercel Cron.
+// Runs every hour via Vercel Cron.
+// For each Gmail-connected user, fires when it's 20:xx in their timezone.
 //
 // Protected by CRON_SECRET — Vercel sends it as Authorization header.
 // To trigger manually: GET /api/cron/digest
 //   with header: Authorization: Bearer <CRON_SECRET>
 // ============================================================
+
+function localHour(timezone: string): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    }).formatToParts(new Date())
+    const hourPart = parts.find(p => p.type === 'hour')
+    return hourPart ? parseInt(hourPart.value, 10) : -1
+  } catch {
+    return -1
+  }
+}
 
 export async function GET(req: NextRequest) {
   // Verify secret
@@ -25,12 +40,21 @@ export async function GET(req: NextRequest) {
   // Find all users with Gmail connected
   const users = await prisma.user.findMany({
     where: { gmailConnected: true },
-    select: { id: true, email: true },
+    select: { id: true, email: true, timezone: true },
   })
 
-  const results: { userId: string; status: string; error?: string }[] = []
+  const results: { userId: string; status: string; reason?: string; error?: string }[] = []
 
   for (const user of users) {
+    const tz = user.timezone || 'UTC'
+    const hour = localHour(tz)
+
+    // Only generate digest when it's 20:xx in the user's timezone
+    if (hour !== 20) {
+      results.push({ userId: user.id, status: 'skipped', reason: `local hour is ${hour} in ${tz}` })
+      continue
+    }
+
     try {
       await createDailyDigest(user.id)
       results.push({ userId: user.id, status: 'ok' })
@@ -41,6 +65,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  console.log(`[cron/digest] Generated ${results.filter(r => r.status === 'ok').length}/${users.length} digests`)
+  const generated = results.filter(r => r.status === 'ok').length
+  const skipped = results.filter(r => r.status === 'skipped').length
+  console.log(`[cron/digest] Generated ${generated}, skipped ${skipped}/${users.length} users`)
   return NextResponse.json({ success: true, results })
 }

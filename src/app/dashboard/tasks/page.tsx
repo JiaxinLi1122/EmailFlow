@@ -22,10 +22,11 @@ import { PageHeader } from '@/components/page-header'
 import { MonthYearPanel } from '@/components/month-year-panel'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
+import { ContextGroupHeader } from '@/components/context-group-header'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
-  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, ChevronDown, FolderOpen,
+  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, FolderOpen,
 } from 'lucide-react'
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -42,6 +43,12 @@ type TaskEmailLink = {
   } | null
 }
 
+type TaskProject = {
+  id: string
+  name: string
+  identity: { id: string; name: string } | null
+} | null
+
 type TaskItem = {
   id: string
   title: string
@@ -52,17 +59,8 @@ type TaskItem = {
   inferredDeadline?: string | null
   userSetDeadline?: string | null
   emailLinks?: TaskEmailLink[]
-}
-
-type MatterItem = {
-  id: string
-  title: string
-  status: string
-  topic: string
-  summary?: string | null
-  nextAction?: string | null
-  lastMessageAt?: string | null
-  taskIds: string[]
+  project?: TaskProject
+  matter?: { id: string; title: string } | null
 }
 
 type TaskUpdateData = {
@@ -119,12 +117,6 @@ export default function TasksPage() {
       fetch(`/api/tasks?status=${apiStatus}&sort=${sortBy}&limit=50`).then((r) => r.json()),
   })
 
-  // Fetch matters for project grouping
-  const { data: mattersRes } = useQuery({
-    queryKey: ['matters'],
-    queryFn: () => fetch('/api/matters').then((r) => r.json()),
-  })
-  const matters: MatterItem[] = mattersRes?.data || []
 
   const handleModalOpenChange = (open: boolean) => {
     setShowCreateModal(open)
@@ -183,7 +175,7 @@ export default function TasksPage() {
     },
   })
 
-  const tasks: TaskItem[] = (res as QueryResponse<TaskItem[]>)?.data || []
+  const tasks = useMemo(() => ((res as QueryResponse<TaskItem[]>)?.data || []) as TaskItem[], [res])
 
   return (
     <div className="space-y-5">
@@ -213,11 +205,13 @@ export default function TasksPage() {
       {/* Filter bar */}
       <div className="rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <SegmentedControl
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={STATUS_OPTIONS}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <SegmentedControl
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={STATUS_OPTIONS}
+            />
+          </div>
 
           <div className="flex min-h-7 justify-start sm:min-w-[180px] sm:justify-end">
             {viewMode === 'list' ? (
@@ -249,7 +243,7 @@ export default function TasksPage() {
             description="Try a different filter or create a task manually."
           />
         ) : viewMode === 'list' ? (
-          <TaskListView tasks={tasks} updateTask={updateTask} matters={matters} />
+          <TaskListView tasks={tasks} updateTask={updateTask} />
         ) : viewMode === 'timeline' ? (
           <GanttTimeline tasks={tasks} updateTask={updateTask} />
         ) : (
@@ -317,52 +311,46 @@ export default function TasksPage() {
   )
 }
 
-/* ========== LIST VIEW — matter-grouped ========== */
-function TaskListView({ tasks, updateTask, matters }: { tasks: TaskItem[]; updateTask: MutationLike; matters: MatterItem[] }) {
-  // Build taskId → matter map
-  const taskToMatter = useMemo(() => {
-    const map = new Map<string, MatterItem>()
-    for (const matter of matters) {
-      for (const taskId of matter.taskIds) {
-        map.set(taskId, matter)
-      }
-    }
-    return map
-  }, [matters])
+/* ========== LIST VIEW — identity → project grouped ========== */
+function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: MutationLike }) {
+  type ProjectGroup = {
+    identityKey: string
+    identityName: string
+    projectKey: string
+    projectName: string
+    items: TaskItem[]
+  }
 
-  // Group tasks by matter; unmatched → ungrouped
-  const { matterGroups, ungrouped } = useMemo(() => {
-    const grouped = new Map<string, { matter: MatterItem; tasks: TaskItem[] }>()
+  const { projectGroups, ungrouped } = useMemo(() => {
     const ungrouped: TaskItem[] = []
-    for (const task of tasks) {
-      const matter = taskToMatter.get(task.id)
-      if (matter) {
-        if (!grouped.has(matter.id)) grouped.set(matter.id, { matter, tasks: [] })
-        grouped.get(matter.id)!.tasks.push(task)
-      } else {
-        ungrouped.push(task)
-      }
-    }
-    // Sort groups by most recent activity
-    const groups = Array.from(grouped.values()).sort((a, b) => {
-      const at = a.matter.lastMessageAt ? new Date(a.matter.lastMessageAt).getTime() : 0
-      const bt = b.matter.lastMessageAt ? new Date(b.matter.lastMessageAt).getTime() : 0
-      return bt - at
-    })
-    return { matterGroups: groups, ungrouped }
-  }, [tasks, taskToMatter])
+    const projectMap = new Map<string, ProjectGroup>()
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
+    for (const task of tasks) {
+      if (!task.project) {
+        ungrouped.push(task)
+        continue
       }
-      return next
-    })
+
+      const identityName = task.project.identity?.name || 'Unassigned Identity'
+      const identityKey = task.project.identity?.id || '__identity_unassigned__'
+      const projectName = task.project.name
+      const projectKey = task.project.id
+      const key = `${identityKey}::${projectKey}`
+
+      if (!projectMap.has(key)) {
+        projectMap.set(key, { identityKey, identityName, projectKey, projectName, items: [] })
+      }
+      projectMap.get(key)!.items.push(task)
+    }
+
+    const projectGroups = Array.from(projectMap.values()).sort((a, b) =>
+      a.identityName !== b.identityName
+        ? a.identityName.localeCompare(b.identityName)
+        : a.projectName.localeCompare(b.projectName)
+    )
+
+    return { projectGroups, ungrouped }
+  }, [tasks])
 
   if (tasks.length === 0) {
     return (
@@ -376,98 +364,31 @@ function TaskListView({ tasks, updateTask, matters }: { tasks: TaskItem[]; updat
 
   return (
     <div className="space-y-3">
-      {matterGroups.map(({ matter, tasks: mTasks }) => (
-        <MatterSection
-          key={matter.id}
-          matter={matter}
-          tasks={mTasks}
-          updateTask={updateTask}
-          collapsed={collapsed.has(matter.id)}
-          onToggle={() => toggle(matter.id)}
-        />
+      {projectGroups.map((group) => (
+        <div key={`${group.identityKey}-${group.projectKey}`} className="space-y-3">
+          <ContextGroupHeader
+            identityName={group.identityName}
+            projectName={group.projectName}
+            detail={`${group.items.length} task${group.items.length !== 1 ? 's' : ''} in this project`}
+          />
+          <div className="space-y-2">
+            {group.items.map((task) => (
+              <TaskRow key={task.id} task={task} updateTask={updateTask} />
+            ))}
+          </div>
+        </div>
       ))}
       {ungrouped.length > 0 && (
-        <MatterSection
-          matter={null}
-          tasks={ungrouped}
-          updateTask={updateTask}
-          collapsed={collapsed.has('__ungrouped__')}
-          onToggle={() => toggle('__ungrouped__')}
-        />
-      )}
-    </div>
-  )
-}
-
-const TOPIC_LABELS: Record<string, string> = {
-  meeting: 'Meeting', invoice: 'Invoice', project_update: 'Project',
-  support: 'Support', application: 'Application', approval: 'Approval',
-  deadline: 'Deadline', other: 'Other',
-}
-const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-100 text-blue-700',
-  pending: 'bg-yellow-100 text-yellow-700',
-  waiting_reply: 'bg-orange-100 text-orange-700',
-  completed: 'bg-green-100 text-green-700',
-}
-
-function MatterSection({
-  matter, tasks, updateTask, collapsed, onToggle,
-}: {
-  matter: MatterItem | null; tasks: TaskItem[]; updateTask: MutationLike; collapsed: boolean; onToggle: () => void
-}) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white/95 shadow-sm">
-      {/* Section header */}
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
-      >
-        <ChevronDown className={`h-4 w-4 text-gray-400 shrink-0 transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}`} />
-        <FolderOpen className={`h-4 w-4 shrink-0 ${matter ? 'text-blue-400' : 'text-gray-300'}`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm text-gray-900">
-              {matter ? matter.title : 'Uncategorized'}
-            </span>
-            {matter && (
-              <>
-                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[matter.status] || 'bg-gray-100 text-gray-500'}`}>
-                  {matter.status.replace('_', ' ')}
-                </span>
-                <span className="text-[10px] text-gray-400">
-                  {TOPIC_LABELS[matter.topic] || matter.topic}
-                </span>
-              </>
-            )}
-          </div>
-          {matter?.summary && (
-            <p className="text-xs text-gray-400 truncate mt-0.5">{matter.summary}</p>
-          )}
-        </div>
-        <span className="shrink-0 text-xs text-gray-400 ml-2">
-          {tasks.length} task{tasks.length !== 1 ? 's' : ''}
-        </span>
-      </button>
-
-      {/* Task rows */}
-      {!collapsed && (
-        <div className="space-y-2 border-t bg-gray-50/50 px-3 pb-3 pt-1">
-          {tasks.map((task) => (
+        <div className="space-y-2">
+          {ungrouped.map((task) => (
             <TaskRow key={task.id} task={task} updateTask={updateTask} />
           ))}
-          {matter?.nextAction && (
-            <p className="px-2 pt-1 text-[11px] text-gray-400 italic">
-              Next action: {matter.nextAction}
-            </p>
-          )}
         </div>
       )}
     </div>
   )
 }
 
-/* ========== TASK ROW ========== */
 function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLike }) {
   const band = getPriorityBand(task.priorityScore || 0)
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
@@ -793,3 +714,4 @@ function TaskCalendarView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask
     </Card>
   )
 }
+
