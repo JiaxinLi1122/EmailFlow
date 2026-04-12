@@ -19,7 +19,7 @@ import { format } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
 import { getEmailClassConfig } from '@/lib/email-classification'
 
-type Tab = 'actionable' | 'informational' | 'all'
+type Tab = 'actionable' | 'informational' | 'uncertain' | 'all'
 type EmailClassification = 'action' | 'awareness' | 'ignore' | 'uncertain'
 
 type LinkedTask = {
@@ -120,12 +120,12 @@ export default function EmailsPage() {
 
     if (tab === 'actionable') {
       result = result.filter((e) =>
-        e.classification === 'action' || e.classification === 'uncertain' || (e.taskLinks?.length ?? 0) > 0
+        e.classification === 'action' || (e.taskLinks?.length ?? 0) > 0
       )
     } else if (tab === 'informational') {
-      result = result.filter((e) =>
-        (e.classification === 'awareness' || e.classification === 'ignore') && !((e.taskLinks?.length ?? 0) > 0)
-      )
+      result = result.filter((e) => e.classification === 'awareness')
+    } else if (tab === 'uncertain') {
+      result = result.filter((e) => e.classification === 'uncertain')
     }
 
     if (classification !== 'all') {
@@ -179,14 +179,14 @@ export default function EmailsPage() {
 
   // Counts for tab badges
   const actionableCount = emails.filter((e) =>
-    e.classification === 'action' || e.classification === 'uncertain' || (e.taskLinks?.length ?? 0) > 0
+    e.classification === 'action' || (e.taskLinks?.length ?? 0) > 0
   ).length
-  const infoCount = emails.filter((e) =>
-    (e.classification === 'awareness' || e.classification === 'ignore') && !((e.taskLinks?.length ?? 0) > 0)
-  ).length
+  const infoCount = emails.filter((e) => e.classification === 'awareness').length
+  const uncertainCount = emails.filter((e) => e.classification === 'uncertain').length
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'actionable', label: 'Actionable', count: actionableCount },
+    { key: 'uncertain', label: 'Uncertain', count: uncertainCount },
     { key: 'informational', label: 'Informational', count: infoCount },
     { key: 'all', label: 'All Mail', count: emails.length },
   ]
@@ -465,15 +465,17 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
       identity.projectMap.get(pId)!.items.push(email)
     }
 
+    const latestTime = (items: EmailItem[]) =>
+      Math.max(...items.map((e) => new Date(e.receivedAt).getTime()))
+
     const identityGroups: EmailIdentityGroup[] = Array.from(identityMap.entries())
-      .map(([id, { name, projectMap }]) => ({
-        id,
-        name,
-        projects: Array.from(projectMap.entries())
+      .map(([id, { name, projectMap }]) => {
+        const projects = Array.from(projectMap.entries())
           .map(([pid, { name, items }]) => ({ id: pid, name, items }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => latestTime(b.items) - latestTime(a.items))
+        return { id, name, projects }
+      })
+      .sort((a, b) => latestTime(b.projects.flatMap((p) => p.items)) - latestTime(a.projects.flatMap((p) => p.items)))
 
     return { identityGroups, ungrouped }
   }, [emails])

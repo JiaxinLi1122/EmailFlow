@@ -349,15 +349,19 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
       identity.projectMap.get(pId)!.items.push(task)
     }
 
+    const latestScore = (items: TaskItem[]) =>
+      Math.max(...items.map((t) => t.priorityScore ?? 0))
+
     const identityGroups: IdentityGroup[] = Array.from(identityMap.entries())
-      .map(([id, { name, projectMap }]) => ({
-        id,
-        name,
-        projects: Array.from(projectMap.entries())
+      .map(([id, { name, projectMap }]) => {
+        const projects = Array.from(projectMap.entries())
           .map(([pid, { name, items }]) => ({ id: pid, name, items }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => latestScore(b.items) - latestScore(a.items))
+        return { id, name, projects }
+      })
+      .sort((a, b) =>
+        latestScore(b.projects.flatMap((p) => p.items)) - latestScore(a.projects.flatMap((p) => p.items))
+      )
 
     return { identityGroups, ungrouped }
   }, [tasks])
