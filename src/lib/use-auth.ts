@@ -28,7 +28,10 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
-    queryClient.invalidateQueries({ queryKey: ['auth-user'] })
+    // Remove the cached user immediately so any mounted layout/page that checks
+    // isAuthenticated sees null right away, rather than keeping the old user
+    // object around as stale data.
+    queryClient.removeQueries({ queryKey: ['auth-user'] })
     router.push('/auth/signin')
   }, [queryClient, router])
 

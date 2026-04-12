@@ -45,7 +45,10 @@ export default function SignInPage() {
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: ['auth-user'] })
+      // Set user in cache immediately so DashboardLayout sees isAuthenticated=true
+      // before the background refetch completes. Without this, the cache still
+      // holds null from the post-logout refetch and the dashboard redirects away.
+      queryClient.setQueryData(['auth-user'], data.data)
       router.push('/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')
