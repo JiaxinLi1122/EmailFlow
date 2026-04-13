@@ -86,10 +86,20 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
       return { synced: 0, tasks: 0, review: null }
     }
 
-    // 2) Store emails first
-    const storedEmails = await Promise.all(
-      messages.map((message) => emailRepo.storeEmail({ userId, message }))
-    )
+    // 2) Store emails one-by-one so a single failure cannot prevent
+    //    updateLastSync from running.  Promise.all would reject on the
+    //    first error (connection-pool exhaustion, payload issue, etc.)
+    //    while earlier upserts had already committed — leaving emails
+    //    in the DB but lastSyncAt still null.
+    const storedEmails: Awaited<ReturnType<typeof emailRepo.storeEmail>>[] = []
+    for (const message of messages) {
+      try {
+        const stored = await emailRepo.storeEmail({ userId, message })
+        storedEmails.push(stored)
+      } catch (err) {
+        console.error(`Failed to store email ${message.providerMessageId}:`, err)
+      }
+    }
 
     // 3) Mark sync time now — before AI pipeline so it's persisted even if
     //    downstream processing is slow or the request times out
