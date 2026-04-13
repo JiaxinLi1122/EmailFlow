@@ -12,20 +12,23 @@ export interface StoreEmailData {
 }
 
 export async function storeEmail(data: StoreEmailData) {
-  return prisma.email.create({
-    data: {
-      userId: data.userId,
-      gmailMessageId: data.message.providerMessageId,
-      threadId: data.message.threadId,
-      subject: data.message.subject,
-      sender: data.message.sender,
-      recipients: JSON.stringify(data.message.recipients),
-      bodyPreview: data.message.bodyPreview,
-      bodyFull: data.message.bodyFull,
-      receivedAt: data.message.receivedAt,
-      labels: JSON.stringify(data.message.labels),
-      hasAttachments: data.message.hasAttachments,
-    },
+  const fields = {
+    userId: data.userId,
+    gmailMessageId: data.message.providerMessageId,
+    threadId: data.message.threadId,
+    subject: data.message.subject,
+    sender: data.message.sender,
+    recipients: JSON.stringify(data.message.recipients),
+    bodyPreview: data.message.bodyPreview,
+    bodyFull: data.message.bodyFull,
+    receivedAt: data.message.receivedAt,
+    labels: JSON.stringify(data.message.labels),
+    hasAttachments: data.message.hasAttachments,
+  }
+  return prisma.email.upsert({
+    where: { gmailMessageId: data.message.providerMessageId },
+    create: fields,
+    update: {},
   })
 }
 
