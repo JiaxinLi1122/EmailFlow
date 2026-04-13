@@ -96,11 +96,13 @@ export async function GET(req: NextRequest) {
       gmailEmail?: string
       gmailAccessToken: string
       gmailConnected: boolean
+      syncEnabled: boolean
       gmailTokenExpiry?: Date | null
       gmailRefreshToken?: string
     } = {
       gmailAccessToken: accessToken,
       gmailConnected: true,
+      syncEnabled: true,
       gmailTokenExpiry: expiryDate,
     }
 

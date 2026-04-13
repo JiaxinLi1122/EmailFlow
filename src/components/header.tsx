@@ -64,6 +64,15 @@ export function Header() {
     onError: (err) => {
       console.error('Sync failed:', err)
       toast.error('Sync failed')
+      // Refetch stats even on failure — lastSyncAt may have been written before
+      // the error occurred, so the UI should reflect the current DB state.
+      queryClient.invalidateQueries({
+        predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+      })
+      queryClient.refetchQueries({
+        predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+        type: 'active',
+      })
     },
   })
 

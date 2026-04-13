@@ -91,7 +91,11 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
       messages.map((message) => emailRepo.storeEmail({ userId, message }))
     )
 
-    // 3) Run email processing pipeline on each stored email
+    // 3) Mark sync time now — before AI pipeline so it's persisted even if
+    //    downstream processing is slow or the request times out
+    await userRepo.updateLastSync(userId)
+
+    // 4) Run email processing pipeline on each stored email
     let tasksCreated = 0
     const reviewItems: PipelineReviewCandidate[] = []
 
@@ -119,9 +123,6 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
         console.error(`Failed to process email ${email.id}:`, err)
       }
     }
-
-    // 4) Update last sync time
-    await userRepo.updateLastSync(userId)
 
     return {
       synced: storedEmails.length,
