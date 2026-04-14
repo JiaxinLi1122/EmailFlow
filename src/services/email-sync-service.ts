@@ -64,6 +64,10 @@ function buildBatchReviewPayload(items: PipelineReviewCandidate[]): BatchClassif
 // Then retry any previously failed emails from prior runs.
 // ============================================================
 
+// Maximum number of previously-failed emails to retry per sync run.
+// Caps retry overhead on syncs that have a large backlog.
+const RETRY_BATCH_SIZE = 10
+
 export interface SyncResult {
   success: true
   data: {
@@ -80,6 +84,7 @@ export interface SyncResult {
 }
 
 export async function syncEmails(userId: string, sinceDays: number = 7): Promise<SyncResult> {
+  const t0 = Date.now()
   try {
     const syncInfo = await userRepo.getUserSyncInfo(userId)
 
@@ -96,13 +101,45 @@ export async function syncEmails(userId: string, sinceDays: number = 7): Promise
     }
 
     // 1) Fetch new emails from Gmail
+    const tFetch = Date.now()
     const messages = await gmailProvider.fetchNewEmails(userId, sinceDays)
+    console.log(`[sync] fetchNewEmails: ${Date.now() - tFetch}ms, count=${messages.length}`)
+
+    // Early return when there is nothing new to process.
+    // updateLastSync still runs so the UI reflects the check time.
+    // Retry and AI pipeline are skipped — they only add latency when the inbox is quiet.
+    if (messages.length === 0) {
+      const tUpdateSync = Date.now()
+      await userRepo.updateLastSync(userId)
+      console.log(`[sync] updateLastSync: ${Date.now() - tUpdateSync}ms`)
+
+      const tCount = Date.now()
+      const pendingFailedCount = await failedRepo.countPendingFailures(userId)
+      console.log(`[sync] countPendingFailures: ${Date.now() - tCount}ms, pending=${pendingFailedCount}`)
+
+      console.log(`[sync] total (no new emails): ${Date.now() - t0}ms`)
+      return {
+        success: true,
+        data: {
+          totalFetched: 0,
+          syncedCount: 0,
+          skippedCount: 0,
+          failedCount: 0,
+          retriedSuccessCount: 0,
+          retriedFailedCount: 0,
+          pendingFailedCount,
+          tasks: 0,
+          review: null,
+        },
+      }
+    }
 
     // 2) Store emails one-by-one so a single failure cannot prevent
     //    updateLastSync from running.  Promise.all would reject on the
     //    first error (connection-pool exhaustion, payload issue, etc.)
     //    while earlier upserts had already committed — leaving emails
     //    in the DB but lastSyncAt still null.
+    const tStore = Date.now()
     const storedEmails: Awaited<ReturnType<typeof emailRepo.storeEmail>>['email'][] = []
     let syncedCount = 0
     let skippedCount = 0
@@ -129,12 +166,16 @@ export async function syncEmails(userId: string, sinceDays: number = 7): Promise
         }
       }
     }
+    console.log(`[sync] storeEmails: ${Date.now() - tStore}ms, synced=${syncedCount}, skipped=${skippedCount}, failed=${failedCount}`)
 
     // 3) Mark sync time now — before AI pipeline so it's persisted even if
     //    downstream processing is slow or the request times out
+    const tUpdateSync = Date.now()
     await userRepo.updateLastSync(userId)
+    console.log(`[sync] updateLastSync: ${Date.now() - tUpdateSync}ms`)
 
     // 4) Run email processing pipeline on each stored email
+    const tAI = Date.now()
     let tasksCreated = 0
     const reviewItems: PipelineReviewCandidate[] = []
 
@@ -162,15 +203,16 @@ export async function syncEmails(userId: string, sinceDays: number = 7): Promise
         console.error(`Failed to process email ${email.id}:`, err)
       }
     }
+    console.log(`[sync] aiPipeline: ${Date.now() - tAI}ms, processed=${storedEmails.length}, tasks=${tasksCreated}`)
 
-    // 5) Retry previously failed emails.
+    // 5) Retry previously failed emails (capped at RETRY_BATCH_SIZE per run).
     //    Runs after the main flow so normal sync always takes priority.
     //    loadPendingFailures excludes resolved and permanent_failed records.
-    const { retriedSuccessCount, retriedFailedCount } = await retryFailedEmails(userId)
+    const tRetry = Date.now()
+    const { retriedSuccessCount, retriedFailedCount, pendingFailedCount } = await retryFailedEmails(userId)
+    console.log(`[sync] retryFailedEmails: ${Date.now() - tRetry}ms, success=${retriedSuccessCount}, failed=${retriedFailedCount}, remaining=${pendingFailedCount}`)
 
-    // 6) Count remaining pending failures for the response
-    const pendingFailedCount = await failedRepo.countPendingFailures(userId)
-
+    console.log(`[sync] total: ${Date.now() - t0}ms`)
     return {
       success: true,
       data: {
@@ -198,17 +240,21 @@ export async function syncEmails(userId: string, sinceDays: number = 7): Promise
 // exists (stored by another path) — treat that as resolved.
 // ============================================================
 
-async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount: number; retriedFailedCount: number }> {
+async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount: number; retriedFailedCount: number; pendingFailedCount: number }> {
   let retriedSuccessCount = 0
   let retriedFailedCount = 0
 
-  let pendingRecords: Awaited<ReturnType<typeof failedRepo.loadPendingFailures>>
+  let allPendingRecords: Awaited<ReturnType<typeof failedRepo.loadPendingFailures>>
   try {
-    pendingRecords = await failedRepo.loadPendingFailures(userId)
+    allPendingRecords = await failedRepo.loadPendingFailures(userId)
   } catch (err) {
     console.error('Failed to load pending retry records:', err)
-    return { retriedSuccessCount, retriedFailedCount }
+    return { retriedSuccessCount, retriedFailedCount, pendingFailedCount: 0 }
   }
+
+  // Process only a bounded batch per run — keeps retry overhead predictable
+  // even when the backlog is large.
+  const pendingRecords = allPendingRecords.slice(0, RETRY_BATCH_SIZE)
 
   for (const record of pendingRecords) {
     try {
@@ -249,5 +295,10 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
     }
   }
 
-  return { retriedSuccessCount, retriedFailedCount }
+  // Remaining count: total pending minus the ones we just resolved in this batch.
+  // This avoids an extra DB query — it's an estimate based on what we loaded, which
+  // is accurate enough for the sync response display.
+  const pendingFailedCount = Math.max(0, allPendingRecords.length - retriedSuccessCount)
+
+  return { retriedSuccessCount, retriedFailedCount, pendingFailedCount }
 }
