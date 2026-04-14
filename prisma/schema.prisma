@@ -23,6 +23,10 @@ model User {
   gmailRefreshToken String?
   gmailTokenExpiry  DateTime?
   gmailConnected    Boolean   @default(false)
+  emailProviderReauthRequired Boolean @default(false)
+  emailProviderReauthReason   String?
+  emailProviderReauthAt       DateTime?
+  emailProviderReauthProvider String?
 
   syncStartDate DateTime?
   lastSyncAt  DateTime?
@@ -76,6 +80,7 @@ model Session {
   userAgent    String   @default("")
   deviceFingerprint String?
   isNewDevice  Boolean  @default(false)
+  remember      Boolean @default(false)
   lastActiveAt DateTime @default(now())
   expiresAt    DateTime
   revokedAt    DateTime?

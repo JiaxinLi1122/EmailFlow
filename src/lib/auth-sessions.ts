@@ -1,18 +1,17 @@
 import crypto from 'node:crypto'
 
 import type { Prisma } from '@prisma/client'
+import { AppError } from '@/lib/app-errors'
 import { prisma } from '@/lib/prisma'
 import { sendNewDeviceLoginEmail, sendSuspiciousActivityEmail } from '@/lib/mailer'
-import {
-  SESSION_MAX_AGE_DEFAULT_SECONDS,
-  SESSION_MAX_AGE_REMEMBER_SECONDS,
-} from '@/lib/auth-token'
+import { SESSION_MAX_AGE_REMEMBER_SECONDS } from '@/lib/auth-token'
 
 const ACTIVE_STATUS = 'active'
 const EXPIRED_STATUS = 'expired'
 const REVOKED_STATUS = 'revoked'
 const LAST_ACTIVE_UPDATE_INTERVAL_MS = 5 * 60 * 1000
 const MAX_ACTIVE_SESSIONS = 3
+const SESSION_INACTIVITY_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
 // After rotation, the old token is accepted for this many ms (handles in-flight concurrent requests)
 const ROTATION_GRACE_PERIOD_MS = 30 * 1000
 
@@ -35,6 +34,7 @@ export interface SessionContext {
     ipAddress: string
     userAgent: string
     isNewDevice: boolean
+    remember: boolean
     lastActiveAt: Date
     expiresAt: Date
     revokedAt: Date | null
@@ -43,10 +43,6 @@ export interface SessionContext {
     updatedAt: Date
   }
   user: SessionUser
-}
-
-function sessionLifetimeSeconds(remember: boolean) {
-  return remember ? SESSION_MAX_AGE_REMEMBER_SECONDS : SESSION_MAX_AGE_DEFAULT_SECONDS
 }
 
 function getIpAddress(request: Request) {
@@ -172,6 +168,10 @@ async function markSessionExpired(sessionId: string) {
   }).catch(() => null)
 }
 
+function isInactiveExpired(lastActiveAt: Date, now: Date) {
+  return now.getTime() - lastActiveAt.getTime() >= SESSION_INACTIVITY_TIMEOUT_MS
+}
+
 function toSessionUser(user: { id: string; email: string; name: string | null }): SessionUser {
   return {
     id: user.id,
@@ -189,7 +189,7 @@ export async function createUserSession(input: {
   const remember = Boolean(input.remember)
   const sendNewDeviceAlert = input.sendNewDeviceAlert !== false
   const now = new Date()
-  const expiresAt = new Date(now.getTime() + sessionLifetimeSeconds(remember) * 1000)
+  const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE_REMEMBER_SECONDS * 1000)
   const rawToken = createRawSessionToken()
   const tokenHash = sessionTokenHash(rawToken)
   const device = getDeviceInfo(input.request)
@@ -251,6 +251,7 @@ export async function createUserSession(input: {
         userAgent: device.userAgent,
         deviceFingerprint: device.deviceFingerprint,
         isNewDevice: !isKnownDevice,
+        remember,
         lastActiveAt: now,
         expiresAt,
         status: ACTIVE_STATUS,
@@ -377,23 +378,47 @@ async function resolveSession(hash: string, now: Date): Promise<SessionWithUser 
 }
 
 export async function validateSessionToken(token: string | null): Promise<SessionContext | null> {
-  if (!token) return null
+  try {
+    return await requireSessionToken(token)
+  } catch {
+    return null
+  }
+}
+
+export async function requireSessionToken(token: string | null): Promise<SessionContext> {
+  if (!token) {
+    throw new AppError('UNAUTHORIZED', 'Authentication required.', 401)
+  }
 
   const now = new Date()
   const hash = sessionTokenHash(token)
 
   const session = await resolveSession(hash, now)
-  if (!session) return null
+  if (!session) {
+    throw new AppError('UNAUTHORIZED', 'Authentication required.', 401)
+  }
+
+  if (session.status !== ACTIVE_STATUS || session.revokedAt) {
+    const code = session.revokedAt || session.status === REVOKED_STATUS ? 'SESSION_REVOKED' : 'UNAUTHORIZED'
+    const message =
+      code === 'SESSION_REVOKED'
+        ? 'This session has been revoked. Please sign in again.'
+        : 'Authentication required.'
+    throw new AppError(code, message, 401)
+  }
 
   if (session.expiresAt <= now) {
     if (session.status === ACTIVE_STATUS) {
       await markSessionExpired(session.id)
     }
-    return null
+    throw new AppError('SESSION_EXPIRED', 'Your session has expired. Please sign in again.', 401)
   }
 
-  if (session.status !== ACTIVE_STATUS || session.revokedAt) {
-    return null
+  if (isInactiveExpired(session.lastActiveAt, now)) {
+    if (session.status === ACTIVE_STATUS) {
+      await markSessionExpired(session.id)
+    }
+    throw new AppError('SESSION_INACTIVE_EXPIRED', 'Your session expired after inactivity. Please sign in again.', 401)
   }
 
   if (now.getTime() - session.lastActiveAt.getTime() >= LAST_ACTIVE_UPDATE_INTERVAL_MS) {
@@ -416,6 +441,7 @@ export async function validateSessionToken(token: string | null): Promise<Sessio
       ipAddress: session.ipAddress,
       userAgent: session.userAgent,
       isNewDevice: session.isNewDevice,
+      remember: session.remember,
       lastActiveAt: session.lastActiveAt,
       expiresAt: session.expiresAt,
       revokedAt: session.revokedAt,
@@ -556,7 +582,10 @@ export async function listActiveSessions(userId: string) {
       userId,
       status: ACTIVE_STATUS,
       revokedAt: null,
-      expiresAt: { lte: now },
+      OR: [
+        { expiresAt: { lte: now } },
+        { lastActiveAt: { lte: new Date(now.getTime() - SESSION_INACTIVITY_TIMEOUT_MS) } },
+      ],
     },
     data: { status: EXPIRED_STATUS },
   })
@@ -567,6 +596,7 @@ export async function listActiveSessions(userId: string) {
       status: ACTIVE_STATUS,
       revokedAt: null,
       expiresAt: { gt: now },
+      lastActiveAt: { gt: new Date(now.getTime() - SESSION_INACTIVITY_TIMEOUT_MS) },
     },
     orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }],
     select: {

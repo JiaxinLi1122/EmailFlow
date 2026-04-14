@@ -1,13 +1,12 @@
 export const dynamic = "force-dynamic"
 import { after } from 'next/server'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success } from '@/lib/api-helpers'
 import { syncEmailsPhase1, syncEmailsPhase2 } from '@/services/email-sync-service'
 
 export async function POST() {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
-
   try {
+    const user = await getAuthUser()
+
     // Phase 1: Gmail fetch + email storage + updateLastSync.
     // Returns in seconds (Gmail API + DB writes, no AI).
     const phase1 = await syncEmailsPhase1(user.id)
@@ -31,8 +30,7 @@ export async function POST() {
       processing: phase1.storedEmails.length > 0,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Email sync failed'
     console.error('Sync failed:', err)
-    return error('SYNC_FAILED', message, 500)
+    return errorFromException(err, 'SYNC_FAILED', 'Email sync failed', 500)
   }
 }

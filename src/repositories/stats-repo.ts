@@ -7,7 +7,15 @@ import { prisma } from '@/lib/prisma'
 type DashboardStats = {
   emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number }
   tasks: { total: number; pending: number; completed: number; dismissed: number }
-  sync: { lastSyncAt: Date | null | undefined; gmailConnected: boolean | undefined; syncEnabled: boolean | undefined }
+  sync: {
+    lastSyncAt: Date | null | undefined
+    gmailConnected: boolean | undefined
+    syncEnabled: boolean | undefined
+    providerReauthRequired: boolean | undefined
+    providerReauthReason: string | null | undefined
+    providerReauthAt: Date | null | undefined
+    providerReauthProvider: string | null | undefined
+  }
 }
 
 // Per-user in-memory cache — survives across requests in the same process instance
@@ -34,7 +42,15 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
     }),
     prisma.user.findUnique({
       where: { id: userId },
-      select: { lastSyncAt: true, gmailConnected: true, syncEnabled: true },
+      select: {
+        lastSyncAt: true,
+        gmailConnected: true,
+        syncEnabled: true,
+        emailProviderReauthRequired: true,
+        emailProviderReauthReason: true,
+        emailProviderReauthAt: true,
+        emailProviderReauthProvider: true,
+      },
     }),
   ])
 
@@ -65,6 +81,10 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
       lastSyncAt: userInfo?.lastSyncAt,
       gmailConnected: userInfo?.gmailConnected,
       syncEnabled: userInfo?.syncEnabled,
+      providerReauthRequired: userInfo?.emailProviderReauthRequired,
+      providerReauthReason: userInfo?.emailProviderReauthReason,
+      providerReauthAt: userInfo?.emailProviderReauthAt,
+      providerReauthProvider: userInfo?.emailProviderReauthProvider,
     },
   }
 

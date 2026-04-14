@@ -117,12 +117,12 @@ export default function DashboardPage() {
   })
 
   const s = stats?.data
+  const providerReauthRequired = Boolean(s?.sync?.providerReauthRequired)
 
   // Memoize task-derived data so it only recomputes when allTasksRes changes,
   // not on every re-render triggered by unrelated queries (stats, emails, matters).
   const allTasks = useMemo<DashboardTask[]>(
     () => allTasksRes?.data ?? [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [allTasksRes?.data]
   )
 
@@ -156,7 +156,6 @@ export default function DashboardPage() {
   // Memoize email-derived data so it only recomputes when emailsRes changes.
   const allEmails = useMemo<DashboardEmail[]>(
     () => emailsRes?.data ?? [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [emailsRes?.data]
   )
 
@@ -174,7 +173,6 @@ export default function DashboardPage() {
 
   const matters = useMemo(
     () => (mattersRes?.data ?? []) as DashboardMatter[],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [mattersRes?.data]
   )
 
@@ -226,6 +224,12 @@ export default function DashboardPage() {
         actions={
           statsLoading ? (
             <Skeleton className="h-9 w-28 rounded-lg" />
+          ) : providerReauthRequired ? (
+            <Link href="/dashboard/settings">
+              <Button size="sm" variant="outline" className="border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100">
+                Reconnect Gmail
+              </Button>
+            </Link>
           ) : s?.sync?.gmailConnected ? (
             <Badge className="h-9 rounded-lg bg-green-100 px-4 text-sm font-medium text-green-700 hover:bg-green-100">
               Connected
@@ -264,6 +268,12 @@ export default function DashboardPage() {
           </div>
         </Link>
       )}
+
+      {providerReauthRequired ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Your Gmail connection has expired. Reconnect it in Settings before the next sync.
+        </div>
+      ) : null}
 
       <div className="animate-fade-in-up stagger-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {statsLoading ? (

@@ -6,7 +6,15 @@ import * as statsRepo from '@/repositories/stats-repo'
 const EMPTY_STATS = {
   emails: { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 },
   tasks: { total: 0, pending: 0, completed: 0, dismissed: 0 },
-  sync: { lastSyncAt: null, gmailConnected: false, syncEnabled: false },
+  sync: {
+    lastSyncAt: null,
+    gmailConnected: false,
+    syncEnabled: false,
+    providerReauthRequired: false,
+    providerReauthReason: null,
+    providerReauthAt: null,
+    providerReauthProvider: null,
+  },
 }
 
 export async function GET() {

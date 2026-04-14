@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/use-auth'
+import { ApiClientError, isSessionFailureCode } from '@/lib/api-client'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +29,7 @@ const PROCESSING_REFETCH_DELAY_MS = 20_000
 
 interface SyncResultData {
   ok: boolean
+  code?: string
   syncedCount: number
   skippedCount: number
   failedCount: number
@@ -35,6 +37,7 @@ interface SyncResultData {
   // True when new emails were stored — AI pipeline is running in the background
   processing: boolean
   errorMessage?: string
+  recoveryHint?: string
 }
 
 export function Header() {
@@ -55,7 +58,15 @@ export function Header() {
       const data = await res.json()
 
       if (!res.ok || !data.success) {
-        throw new Error(data?.error || 'Sync failed')
+        if (!res.ok) {
+          throw new ApiClientError(
+            data?.error?.message || 'Sync failed',
+            res.status,
+            data?.error?.code,
+          )
+        }
+
+        throw new Error(data?.error?.message || 'Sync failed')
       }
 
       return data
@@ -109,6 +120,11 @@ export function Header() {
     },
 
     onError: (err) => {
+      if (err instanceof ApiClientError && isSessionFailureCode(err.code)) {
+        logout()
+        return
+      }
+
       console.error('Sync failed:', err)
       queryClient.invalidateQueries({
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
@@ -119,12 +135,19 @@ export function Header() {
       })
       setSyncResult({
         ok: false,
+        code: err instanceof ApiClientError ? err.code : undefined,
         syncedCount: 0,
         skippedCount: 0,
         failedCount: 0,
         pendingFailedCount: 0,
         processing: false,
         errorMessage: err instanceof Error ? err.message : 'Sync failed',
+        recoveryHint:
+          err instanceof ApiClientError && err.code === 'PROVIDER_REAUTH_REQUIRED'
+            ? 'Reconnect your email provider in Settings, then run sync again.'
+            : err instanceof ApiClientError && err.code === 'SYNC_TEMPORARY_ERROR'
+              ? 'This looks temporary. Wait a moment and try again.'
+              : undefined,
       })
       setSyncResultOpen(true)
     },
@@ -189,7 +212,7 @@ interface SyncResultDialogProps {
 function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
   if (!result) return null
 
-  const { ok, syncedCount, skippedCount, failedCount, pendingFailedCount, processing, errorMessage } = result
+  const { ok, code, syncedCount, skippedCount, failedCount, pendingFailedCount, processing, errorMessage, recoveryHint } = result
 
   const isPartial = ok && (failedCount > 0 || pendingFailedCount > 0)
 
@@ -240,7 +263,11 @@ function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
             )}
           </ul>
         ) : (
-          <p className="text-sm text-gray-600">{errorMessage}</p>
+          <div className="space-y-2">
+            <p className="text-sm text-gray-600">{errorMessage}</p>
+            {recoveryHint ? <p className="text-sm text-gray-500">{recoveryHint}</p> : null}
+            {code ? <p className="text-xs uppercase tracking-[0.14em] text-gray-400">{code}</p> : null}
+          </div>
         )}
 
         <DialogFooter showCloseButton={false}>

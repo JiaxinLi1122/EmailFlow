@@ -1,19 +1,17 @@
 export const dynamic = "force-dynamic"
 import { NextRequest } from 'next/server'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success, error } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
-
-  const { title, summary, sourceEmailId, linkedEmailIds } = await req.json()
-
-  if (!title || !sourceEmailId) {
-    return error('BAD_REQUEST', 'Title and sourceEmailId are required', 400)
-  }
-
   try {
+    const user = await getAuthUser()
+    const { title, summary, sourceEmailId, linkedEmailIds } = await req.json()
+
+    if (!title || !sourceEmailId) {
+      return error('BAD_REQUEST', 'Title and sourceEmailId are required', 400)
+    }
+
     // Create task
     const task = await prisma.task.create({
       data: {
@@ -49,6 +47,6 @@ export async function POST(req: NextRequest) {
     return success(task)
   } catch (err) {
     console.error('[api/emails/create-task]', err)
-    return error('INTERNAL_ERROR', 'Failed to create task', 500)
+    return errorFromException(err, 'INTERNAL_ERROR', 'Failed to create task', 500)
   }
 }

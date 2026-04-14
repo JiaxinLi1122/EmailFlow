@@ -1,17 +1,13 @@
 export const dynamic = "force-dynamic"
-import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success, error } from '@/lib/api-helpers'
 import * as taskRepo from '@/repositories/task-repo'
 import { invalidateStatsCache } from '@/repositories/stats-repo'
 import { prisma } from '@/lib/prisma'
 
-const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
-
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthUser()
-    if (!user) return NextResponse.json(EMPTY_LIST)
 
     const url = req.nextUrl
     const page = parseInt(url.searchParams.get('page') || '1')
@@ -33,14 +29,13 @@ export async function GET(req: NextRequest) {
     })
   } catch (err) {
     console.error('[api/tasks GET]', err)
-    return NextResponse.json(EMPTY_LIST)
+    return errorFromException(err, 'INTERNAL_ERROR', 'Failed to load tasks', 500)
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser()
-    if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
 
     const { title, summary } = await req.json()
 
@@ -65,6 +60,6 @@ export async function POST(req: NextRequest) {
     return success(task)
   } catch (err) {
     console.error('[api/tasks POST]', err)
-    return error('INTERNAL_ERROR', 'Failed to create task', 500)
+    return errorFromException(err, 'INTERNAL_ERROR', 'Failed to create task', 500)
   }
 }

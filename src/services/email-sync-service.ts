@@ -1,3 +1,4 @@
+import { AppError } from '@/lib/app-errors'
 import { gmailProvider } from '@/integrations'
 import { processEmail } from '@/workflows'
 import type { PipelineReviewCandidate } from '@/workflows'
@@ -100,6 +101,17 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
   if (!syncInfo) throw new Error('User not found')
   if (!syncInfo.gmailConnected) throw new Error('Gmail not connected')
   if (!syncInfo.syncEnabled) throw new Error('Email sync is disabled')
+  if (syncInfo.emailProviderReauthRequired) {
+    throw new AppError(
+      'PROVIDER_REAUTH_REQUIRED',
+      'Your email provider connection needs to be reauthorized before sync can continue.',
+      401,
+      {
+        provider: syncInfo.emailProviderReauthProvider || 'gmail',
+        reason: syncInfo.emailProviderReauthReason || 'refresh_failed',
+      },
+    )
+  }
 
   // 1) Fetch new emails from Gmail
   const tFetch = Date.now()

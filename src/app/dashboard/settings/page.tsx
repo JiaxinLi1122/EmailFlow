@@ -43,6 +43,10 @@ type CurrentUser = {
   timezone?: string | null
   totpEnabled?: boolean | null
   currentSessionId?: string | null
+  emailProviderReauthRequired?: boolean | null
+  emailProviderReauthReason?: string | null
+  emailProviderReauthAt?: string | null
+  emailProviderReauthProvider?: string | null
 }
 
 type DeviceSession = {
@@ -172,6 +176,11 @@ export default function SettingsPage() {
   const currentUser: CurrentUser | null = meRes?.user || meRes?.data || null
   const syncData = stats?.data?.sync
   const gmailConnected = Boolean(syncData?.gmailConnected)
+  const providerReauthRequired = Boolean(
+    currentUser?.emailProviderReauthRequired || syncData?.providerReauthRequired
+  )
+  const providerReauthProvider =
+    currentUser?.emailProviderReauthProvider || syncData?.providerReauthProvider || 'gmail'
   const connectedGmail = currentUser?.gmailEmail || null
   const currentSyncStartDate = currentUser?.syncStartDate ? new Date(currentUser.syncStartDate) : null
   const supportedTimezones = useMemo(() => {
@@ -336,7 +345,11 @@ export default function SettingsPage() {
               <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-800">
                 Workspace account
               </Badge>
-              {gmailConnected ? (
+              {providerReauthRequired ? (
+                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                  Reconnect required
+                </Badge>
+              ) : gmailConnected ? (
                 <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Gmail connected</Badge>
               ) : (
                 <Badge variant="outline">Gmail not connected</Badge>
@@ -375,17 +388,29 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-gray-900">Gmail</p>
                   <Badge
-                    variant={gmailConnected ? 'default' : 'outline'}
-                    className={gmailConnected ? 'bg-green-100 text-green-700 hover:bg-green-100' : ''}
+                    variant={providerReauthRequired || gmailConnected ? 'default' : 'outline'}
+                    className={
+                      providerReauthRequired
+                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
+                        : gmailConnected
+                          ? 'bg-green-100 text-green-700 hover:bg-green-100'
+                          : ''
+                    }
                   >
-                    {gmailConnected ? 'Connected' : 'Not connected'}
+                    {providerReauthRequired ? 'Reconnect required' : gmailConnected ? 'Connected' : 'Not connected'}
                   </Badge>
                 </div>
                 <p className="text-sm text-gray-600">
-                  {gmailConnected ? connectedGmail || 'Connected Gmail account' : 'Connect Gmail to start syncing mail.'}
+                  {providerReauthRequired
+                    ? 'Your Gmail connection has expired. Reconnect it to resume syncing.'
+                    : gmailConnected
+                      ? connectedGmail || 'Connected Gmail account'
+                      : 'Connect Gmail to start syncing mail.'}
                 </p>
                 <p className="text-xs text-gray-400">
-                  {syncData?.lastSyncAt
+                  {providerReauthRequired
+                    ? `Last valid connection: ${syncData?.providerReauthAt ? new Date(syncData.providerReauthAt).toLocaleString() : 'unknown'}`
+                    : syncData?.lastSyncAt
                     ? `Last synced ${new Date(syncData.lastSyncAt).toLocaleString()}`
                     : gmailConnected
                       ? 'Connection is ready. Your next sync will use the current window below.'
@@ -395,18 +420,20 @@ export default function SettingsPage() {
 
               {gmailConnected ? (
                 <Button
-                  variant="outline"
+                  variant={providerReauthRequired ? 'default' : 'outline'}
                   size="sm"
-                  className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
-                  onClick={() => disconnectMutation.mutate()}
-                  disabled={isBusy}
+                  className={
+                    providerReauthRequired
+                      ? 'gap-2'
+                      : 'gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700'
+                  }
+                  onClick={() => {
+                    window.location.href = '/api/auth/google'
+                  }}
+                  disabled={isBusy || disconnectMutation.isPending}
                 >
-                  {disconnectMutation.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Unplug className="h-3.5 w-3.5" />
-                  )}
-                  Disconnect Gmail
+                  <Mail className="h-3.5 w-3.5" />
+                  {providerReauthRequired ? 'Reconnect Gmail' : 'Reconnect Gmail'}
                 </Button>
               ) : (
                 <a href="/api/auth/google" className="self-start">
@@ -418,6 +445,32 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
+
+          {gmailConnected && !providerReauthRequired ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={isBusy}
+            >
+              {disconnectMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Unplug className="h-3.5 w-3.5" />
+              )}
+              Disconnect Gmail
+            </Button>
+          ) : null}
+
+          {providerReauthRequired ? (
+            <InlineNotice variant="warning">
+              <p className="text-sm">
+                Your {providerReauthProvider === 'outlook' ? 'Outlook' : 'Gmail'} connection can no longer refresh access.
+                Reconnect it, then run sync again.
+              </p>
+            </InlineNotice>
+          ) : null}
 
           <InlineNotice variant="info">
             <p className="text-sm">

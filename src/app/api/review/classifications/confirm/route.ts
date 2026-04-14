@@ -1,5 +1,4 @@
-import { NextResponse } from 'next/server'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success } from '@/lib/api-helpers'
 import * as identityRepo from '@/repositories/identity-repo'
 import * as projectContextRepo from '@/repositories/project-context-repo'
 import * as matterMemoryRepo from '@/repositories/matter-memory-repo'
@@ -23,10 +22,8 @@ type ConfirmPayload = {
 }
 
 export async function POST(req: Request) {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
-
   try {
+    await getAuthUser()
     const body = (await req.json()) as ConfirmPayload
     const identityIdMap = new Map<string, string>()
     const projectIdMap = new Map<string, string>()
@@ -72,7 +69,6 @@ export async function POST(req: Request) {
     return success({ confirmed: true })
   } catch (err) {
     console.error('[api/review/classifications/confirm POST]', err)
-    const message = err instanceof Error ? err.message : 'Failed to confirm classifications'
-    return NextResponse.json({ success: false, error: { code: 'REVIEW_CONFIRM_FAILED', message } }, { status: 500 })
+    return errorFromException(err, 'REVIEW_CONFIRM_FAILED', 'Failed to confirm classifications', 500)
   }
 }

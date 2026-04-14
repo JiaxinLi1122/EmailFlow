@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getCurrentSessionContext } from '@/lib/auth-session'
+import { requireCurrentSessionContext } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, verifyPassword } from '@/lib/auth-password'
 import { consumeStepUpToken } from '@/lib/step-up-auth'
@@ -20,10 +21,7 @@ import { revokeOtherSessions } from '@/lib/auth-sessions'
  */
 export async function POST(req: Request) {
   try {
-    const context = await getCurrentSessionContext()
-    if (!context) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const context = await requireCurrentSessionContext()
 
     const { userId } = context.session
     const body = await req.json()
@@ -41,13 +39,7 @@ export async function POST(req: Request) {
     }
 
     // Validate step-up token first
-    const stepUpValid = await consumeStepUpToken(userId, stepUpToken, 'change_password')
-    if (!stepUpValid) {
-      return NextResponse.json(
-        { success: false, error: 'Step-up verification expired or invalid. Please re-verify.' },
-        { status: 403 },
-      )
-    }
+    await consumeStepUpToken(userId, stepUpToken, 'change_password')
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -94,6 +86,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[api/auth/change-password]', err)
-    return NextResponse.json({ success: false, error: 'Failed to change password' }, { status: 500 })
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to change password', 500)
   }
 }

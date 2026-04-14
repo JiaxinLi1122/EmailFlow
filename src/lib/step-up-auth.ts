@@ -25,6 +25,7 @@
  */
 
 import crypto from 'node:crypto'
+import { AppError } from '@/lib/app-errors'
 import { prisma } from '@/lib/prisma'
 import { sendStepUpOtpEmail } from '@/lib/mailer'
 import { verify } from 'otplib'
@@ -124,11 +125,16 @@ export async function verifyStepUp(
         action,
         otpHash: sha256(code),
         usedAt: null,
-        expiresAt: { gt: now },
       },
     })
 
-    if (!challenge) throw new Error('Invalid or expired verification code')
+    if (!challenge) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid verification code.', 401)
+    }
+
+    if (challenge.expiresAt <= now) {
+      throw new AppError('CODE_EXPIRED', 'Your verification code has expired. Please request a new one.', 401)
+    }
 
     // Mark OTP challenge as used
     await prisma.stepUpChallenge.update({
@@ -162,7 +168,7 @@ export async function consumeStepUpToken(
   userId: string,
   rawToken: string,
   action: StepUpAction,
-): Promise<boolean> {
+): Promise<void> {
   const now = new Date()
   const hash = sha256(rawToken)
 
@@ -174,17 +180,21 @@ export async function consumeStepUpToken(
   if (
     !token ||
     token.userId !== userId ||
-    token.action !== action ||
-    token.usedAt !== null ||
-    token.expiresAt <= now
+    token.action !== action
   ) {
-    return false
+    throw new AppError('VALIDATION_ERROR', 'Invalid step-up verification. Please verify again.', 403)
+  }
+
+  if (token.usedAt !== null) {
+    throw new AppError('VALIDATION_ERROR', 'This verification has already been used. Please verify again.', 403)
+  }
+
+  if (token.expiresAt <= now) {
+    throw new AppError('CODE_EXPIRED', 'Your verification has expired. Please verify again.', 403)
   }
 
   await prisma.stepUpToken.update({
     where: { id: token.id },
     data: { usedAt: now },
   })
-
-  return true
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getCurrentSessionContext } from '@/lib/auth-session'
+import { requireCurrentSessionContext } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { consumeStepUpToken } from '@/lib/step-up-auth'
 import { clearSessionCookie } from '@/lib/auth-token'
@@ -16,10 +17,7 @@ import { clearSessionCookie } from '@/lib/auth-token'
  */
 export async function DELETE(req: Request) {
   try {
-    const context = await getCurrentSessionContext()
-    if (!context) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const context = await requireCurrentSessionContext()
 
     const { userId } = context.session
     const body = await req.json()
@@ -29,13 +27,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: false, error: 'stepUpToken is required' }, { status: 400 })
     }
 
-    const stepUpValid = await consumeStepUpToken(userId, stepUpToken, 'delete_account')
-    if (!stepUpValid) {
-      return NextResponse.json(
-        { success: false, error: 'Step-up verification expired or invalid. Please re-verify.' },
-        { status: 403 },
-      )
-    }
+    await consumeStepUpToken(userId, stepUpToken, 'delete_account')
 
     // Delete the user — cascade will remove sessions, emails, tasks, digests, etc.
     await prisma.user.delete({ where: { id: userId } })
@@ -46,6 +38,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[api/auth/account]', err)
-    return NextResponse.json({ success: false, error: 'Failed to delete account' }, { status: 500 })
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to delete account', 500)
   }
 }

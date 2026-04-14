@@ -1,10 +1,9 @@
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success, error } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(req: Request) {
   try {
     const user = await getAuthUser()
-    if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
 
     const { threadId, projectId } = await req.json()
     if (!threadId || !projectId) return error('BAD_REQUEST', 'threadId and projectId are required', 400)
@@ -50,6 +49,6 @@ export async function POST(req: Request) {
     return success({ affectedEmails, affectedTasks })
   } catch (err) {
     console.error('[api/threads/reassign]', err)
-    return error('INTERNAL', 'Failed to reassign thread', 500)
+    return errorFromException(err, 'INTERNAL', 'Failed to reassign thread', 500)
   }
 }

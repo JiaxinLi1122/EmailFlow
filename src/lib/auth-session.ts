@@ -1,5 +1,10 @@
 import { getSessionToken } from '@/lib/auth-token'
-import { type SessionContext, type SessionUser, validateSessionToken } from '@/lib/auth-sessions'
+import {
+  requireSessionToken,
+  type SessionContext,
+  type SessionUser,
+  validateSessionToken,
+} from '@/lib/auth-sessions'
 
 export async function getCurrentUser(): Promise<SessionUser | null> {
   try {
@@ -18,4 +23,14 @@ export async function getCurrentSessionContext(): Promise<SessionContext | null>
   } catch {
     return null
   }
+}
+
+export async function requireCurrentSessionContext(): Promise<SessionContext> {
+  const token = await getSessionToken()
+  return requireSessionToken(token)
+}
+
+export async function requireCurrentUser(): Promise<SessionUser> {
+  const context = await requireCurrentSessionContext()
+  return context.user
 }

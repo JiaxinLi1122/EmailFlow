@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
+import { requireCurrentUser } from '@/lib/auth-session'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const user = await requireCurrentUser()
 
     const { secret } = await req.json()
 
@@ -26,9 +24,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[api/auth/totp/enable]', err)
-    return NextResponse.json(
-      { success: false, error: 'Failed to enable 2FA' },
-      { status: 500 }
-    )
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to enable 2FA', 500)
   }
 }

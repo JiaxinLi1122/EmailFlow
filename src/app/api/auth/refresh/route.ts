@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 
-import { getSessionToken, setSessionCookie, COOKIE_NAME } from '@/lib/auth-token'
-import { rotateSessionToken, validateSessionToken } from '@/lib/auth-sessions'
-import { cookies } from 'next/headers'
+import { AppError } from '@/lib/app-errors'
+import { getSessionToken, setSessionCookie } from '@/lib/auth-token'
+import { rotateSessionToken, requireSessionToken } from '@/lib/auth-sessions'
+import { errorFromException } from '@/lib/api-helpers'
 
 /**
  * POST /api/auth/refresh
@@ -22,16 +23,10 @@ import { cookies } from 'next/headers'
 export async function POST() {
   try {
     const oldToken = await getSessionToken()
-
     if (!oldToken) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
+      throw new AppError('UNAUTHORIZED', 'Authentication required.', 401)
     }
-
-    // Verify the session is still valid before rotating
-    const context = await validateSessionToken(oldToken)
-    if (!context) {
-      return NextResponse.json({ success: false, error: 'Session expired or invalid' }, { status: 401 })
-    }
+    const context = await requireSessionToken(oldToken)
 
     const result = await rotateSessionToken(oldToken)
 
@@ -41,19 +36,11 @@ export async function POST() {
       return NextResponse.json({ success: true, rotated: false })
     }
 
-    // Read the remember flag from the current cookie's maxAge to preserve it
-    const cookieStore = await cookies()
-    const cookieEntry = cookieStore.get(COOKIE_NAME)
-    // If the cookie had a maxAge set it was a "remember me" cookie — re-set the same way
-    // We can't read maxAge from the incoming cookie, so we derive it from the session expiry
-    const expiresInMs = context.session.expiresAt.getTime() - Date.now()
-    const isRemember = expiresInMs > 25 * 60 * 60 * 1000 // > 25 h means it was a 30-day session
-
-    await setSessionCookie(result.newRawToken, isRemember)
+    await setSessionCookie(result.newRawToken, context.session.remember)
 
     return NextResponse.json({ success: true, rotated: true })
   } catch (err) {
     console.error('[api/auth/refresh]', err)
-    return NextResponse.json({ success: false, error: 'Refresh failed' }, { status: 500 })
+    return errorFromException(err, 'SYNC_FAILED', 'Refresh failed', 500)
   }
 }

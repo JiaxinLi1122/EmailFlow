@@ -1,17 +1,12 @@
 import { NextResponse } from 'next/server'
 
-import { getCurrentSessionContext } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
+import { requireCurrentSessionContext } from '@/lib/auth-session'
 import { listActiveSessions } from '@/lib/auth-sessions'
 
 export async function GET() {
   try {
-    const context = await getCurrentSessionContext()
-    if (!context) {
-      return NextResponse.json(
-        { success: false, error: 'Not authenticated' },
-        { status: 401 }
-      )
-    }
+    const context = await requireCurrentSessionContext()
 
     const sessions = await listActiveSessions(context.user.id)
 
@@ -26,9 +21,6 @@ export async function GET() {
     })
   } catch (err) {
     console.error('[api/auth/sessions]', err)
-    return NextResponse.json(
-      { success: false, error: 'Failed to load sessions' },
-      { status: 500 }
-    )
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to load sessions', 500)
   }
 }

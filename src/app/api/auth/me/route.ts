@@ -1,16 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getCurrentSessionContext } from '@/lib/auth-session'
+import { requireCurrentSessionContext } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
 
 export async function GET() {
   try {
-    const context = await getCurrentSessionContext()
-    if (!context) {
-      return NextResponse.json(
-        { success: false, error: 'Not logged in' },
-        { status: 401 }
-      )
-    }
+    const context = await requireCurrentSessionContext()
 
     const user = await prisma.user.findUnique({
       where: { id: context.user.id },
@@ -22,6 +17,10 @@ export async function GET() {
         syncStartDate: true,
         timezone: true,
         totpEnabled: true,
+        emailProviderReauthRequired: true,
+        emailProviderReauthReason: true,
+        emailProviderReauthAt: true,
+        emailProviderReauthProvider: true,
       },
     })
 
@@ -42,14 +41,15 @@ export async function GET() {
         syncStartDate: user.syncStartDate,
         timezone: user.timezone,
         totpEnabled: user.totpEnabled,
+        emailProviderReauthRequired: user.emailProviderReauthRequired,
+        emailProviderReauthReason: user.emailProviderReauthReason,
+        emailProviderReauthAt: user.emailProviderReauthAt,
+        emailProviderReauthProvider: user.emailProviderReauthProvider,
         currentSessionId: context.session.id,
       },
     })
   } catch (err) {
     console.error('[api/auth/me]', err)
-    return NextResponse.json(
-      { success: false, error: 'Failed to get current user' },
-      { status: 500 }
-    )
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to get current user', 500)
   }
 }

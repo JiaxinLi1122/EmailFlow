@@ -1,17 +1,12 @@
 import { NextResponse } from 'next/server'
 
-import { getCurrentSessionContext } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
+import { requireCurrentSessionContext } from '@/lib/auth-session'
 import { revokeOtherSessions } from '@/lib/auth-sessions'
 
 export async function POST() {
   try {
-    const context = await getCurrentSessionContext()
-    if (!context) {
-      return NextResponse.json(
-        { success: false, error: 'Not authenticated' },
-        { status: 401 }
-      )
-    }
+    const context = await requireCurrentSessionContext()
 
     const count = await revokeOtherSessions(context.user.id, context.session.id)
 
@@ -21,9 +16,6 @@ export async function POST() {
     })
   } catch (err) {
     console.error('[api/auth/sessions/revoke-others]', err)
-    return NextResponse.json(
-      { success: false, error: 'Failed to revoke sessions' },
-      { status: 500 }
-    )
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to revoke sessions', 500)
   }
 }

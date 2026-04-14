@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 
 export default function SignInPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,6 +22,19 @@ export default function SignInPage() {
   const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const reason = searchParams.get('reason')
+
+    if (reason === 'SESSION_EXPIRED' || reason === 'SESSION_INACTIVE_EXPIRED') {
+      setError('Your session has expired. Please sign in again.')
+      return
+    }
+
+    if (reason === 'SESSION_REVOKED') {
+      setError('This session is no longer valid. Please sign in again.')
+    }
+  }, [searchParams])
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()

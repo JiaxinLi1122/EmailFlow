@@ -1,17 +1,13 @@
 export const dynamic = "force-dynamic"
-import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success } from '@/lib/api-helpers'
 import { createDailyDigest, createWeeklyDigest } from '@/workflows/digest-pipeline'
 import * as digestRepo from '@/repositories/digest-repo'
-
-const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
 
 // GET /api/digest — get latest digests
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthUser()
-    if (!user) return NextResponse.json(EMPTY_LIST)
 
     const url = req.nextUrl
     const page = parseInt(url.searchParams.get('page') || '1')
@@ -26,7 +22,7 @@ export async function GET(req: NextRequest) {
     })
   } catch (err) {
     console.error('[api/digest GET]', err)
-    return NextResponse.json(EMPTY_LIST)
+    return errorFromException(err, 'DIGEST_FAILED', 'Failed to load digests', 500)
   }
 }
 
@@ -35,7 +31,6 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser()
-    if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
 
     const body = await req.json().catch(() => ({}))
     const period = body.period === 'weekly' ? 'weekly' : 'daily'
@@ -46,8 +41,7 @@ export async function POST(req: NextRequest) {
 
     return success(digest)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to generate digest'
     console.error('[api/digest POST]', err)
-    return error('DIGEST_FAILED', message, 500)
+    return errorFromException(err, 'DIGEST_FAILED', 'Failed to generate digest', 500)
   }
 }

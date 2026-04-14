@@ -99,11 +99,19 @@ export async function GET(req: NextRequest) {
       syncEnabled: boolean
       gmailTokenExpiry?: Date | null
       gmailRefreshToken?: string
+      emailProviderReauthRequired: boolean
+      emailProviderReauthReason: null
+      emailProviderReauthAt: null
+      emailProviderReauthProvider: 'gmail'
     } = {
       gmailAccessToken: accessToken,
       gmailConnected: true,
       syncEnabled: true,
       gmailTokenExpiry: expiryDate,
+      emailProviderReauthRequired: false,
+      emailProviderReauthReason: null,
+      emailProviderReauthAt: null,
+      emailProviderReauthProvider: 'gmail',
     }
 
     if (gmailEmail) {

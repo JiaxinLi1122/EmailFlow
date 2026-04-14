@@ -1,6 +1,9 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
+import { isSessionFailureCode, readApiClientError } from '@/lib/api-client'
 
 /**
  * Periodically rotates the session token in the background.
@@ -15,6 +18,8 @@ import { useEffect, useRef } from 'react'
 const ROTATION_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
 
 export function useSessionRotation(enabled = true) {
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -22,7 +27,14 @@ export function useSessionRotation(enabled = true) {
 
     async function rotate() {
       try {
-        await fetch('/api/auth/refresh', { method: 'POST' })
+        const response = await fetch('/api/auth/refresh', { method: 'POST' })
+        if (!response.ok) {
+          const error = await readApiClientError(response)
+          if (isSessionFailureCode(error.code)) {
+            queryClient.clear()
+            router.replace(`/auth/signin?reason=${encodeURIComponent(error.code || 'SESSION_EXPIRED')}`)
+          }
+        }
       } catch {
         // Network error — will retry on next interval
       }
@@ -33,5 +45,5 @@ export function useSessionRotation(enabled = true) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [enabled])
+  }, [enabled, queryClient, router])
 }

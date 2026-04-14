@@ -1,11 +1,9 @@
-import { getAuthUser, success, error } from '@/lib/api-helpers'
+import { errorFromException, getAuthUser, success, error } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(req: Request) {
-  const user = await getAuthUser()
-  if (!user) return error('UNAUTHORIZED', 'Not authenticated', 401)
-
   try {
+    const user = await getAuthUser()
     const body = await req.json()
     const { timezone } = body
 
@@ -27,7 +25,6 @@ export async function POST(req: Request) {
 
     return success({ timezone })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to update timezone'
-    return error('UPDATE_FAILED', message, 500)
+    return errorFromException(err, 'UPDATE_FAILED', 'Failed to update timezone', 500)
   }
 }

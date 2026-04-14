@@ -39,7 +39,7 @@ function ResetPasswordForm() {
       })
       const data = await res.json()
       if (!data.success) {
-        setError(data.error || 'Failed to reset password')
+        setError(data.error?.message || data.error || 'Failed to reset password')
       } else {
         setSuccess(true)
       }
@@ -80,6 +80,13 @@ function ResetPasswordForm() {
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           {error && <InlineNotice variant="error">{error}</InlineNotice>}
+          {error.toLowerCase().includes('expired') ? (
+            <div className="text-sm text-gray-500">
+              <Link href="/auth/forgot-password" className="text-blue-600 hover:underline">
+                Request a new reset link
+              </Link>
+            </div>
+          ) : null}
 
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">New password</label>

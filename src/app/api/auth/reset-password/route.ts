@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { AppError } from '@/lib/app-errors'
+import { errorFromException } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, verifyPassword } from '@/lib/auth-password'
 import { hashResetToken } from '@/lib/password-reset'
@@ -35,11 +37,12 @@ export async function POST(req: Request) {
     })
 
     // Normalize token state errors to avoid leaking information
-    if (!record || record.usedAt || record.expiresAt < new Date()) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired reset link' },
-        { status: 400 }
-      )
+    if (!record) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid reset link. Please request a new one.', 400)
+    }
+
+    if (record.usedAt || record.expiresAt < new Date()) {
+      throw new AppError('LINK_EXPIRED', 'This reset link has expired. Please request a new one.', 400)
     }
 
     const user = record.user
@@ -72,9 +75,6 @@ export async function POST(req: Request) {
     })
   } catch (err) {
     console.error('[api/auth/reset-password]', err)
-    return NextResponse.json(
-      { success: false, error: 'Failed to reset password' },
-      { status: 500 }
-    )
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to reset password', 500)
   }
 }

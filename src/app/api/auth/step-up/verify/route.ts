@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth-session'
+import { requireCurrentUser } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
 import { verifyStepUp, type StepUpAction } from '@/lib/step-up-auth'
 
 const VALID_ACTIONS: StepUpAction[] = ['change_password', 'disable_totp', 'delete_account']
@@ -13,10 +14,7 @@ const VALID_ACTIONS: StepUpAction[] = ['change_password', 'disable_totp', 'delet
  */
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const user = await requireCurrentUser()
 
     const body = await req.json()
     const { action, code } = body as { action: StepUpAction; code: string }
@@ -29,17 +27,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Verification code is required' }, { status: 400 })
     }
 
-    let stepUpToken: string
-    try {
-      stepUpToken = await verifyStepUp(user.id, code.trim(), action)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Invalid code'
-      return NextResponse.json({ success: false, error: message }, { status: 401 })
-    }
+    const stepUpToken = await verifyStepUp(user.id, code.trim(), action)
 
     return NextResponse.json({ success: true, data: { stepUpToken } })
   } catch (err) {
     console.error('[api/auth/step-up/verify]', err)
-    return NextResponse.json({ success: false, error: 'Verification failed' }, { status: 500 })
+    return errorFromException(err, 'SYNC_FAILED', 'Verification failed', 500)
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth-session'
+import { errorFromException } from '@/lib/api-helpers'
+import { requireCurrentUser } from '@/lib/auth-session'
 import { prisma } from '@/lib/prisma'
 import { consumeStepUpToken } from '@/lib/step-up-auth'
 
@@ -16,10 +17,7 @@ import { consumeStepUpToken } from '@/lib/step-up-auth'
  */
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const user = await requireCurrentUser()
 
     const body = await req.json()
     const { stepUpToken } = body as { stepUpToken?: string }
@@ -28,13 +26,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'stepUpToken is required' }, { status: 400 })
     }
 
-    const stepUpValid = await consumeStepUpToken(user.id, stepUpToken, 'disable_totp')
-    if (!stepUpValid) {
-      return NextResponse.json(
-        { success: false, error: 'Step-up verification expired or invalid. Please re-verify.' },
-        { status: 403 },
-      )
-    }
+    await consumeStepUpToken(user.id, stepUpToken, 'disable_totp')
 
     const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
@@ -53,6 +45,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[api/auth/totp/disable]', err)
-    return NextResponse.json({ success: false, error: 'Failed to disable 2FA' }, { status: 500 })
+    return errorFromException(err, 'SYNC_FAILED', 'Failed to disable 2FA', 500)
   }
 }

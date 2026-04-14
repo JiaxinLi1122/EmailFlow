@@ -14,6 +14,14 @@ export async function updateLastSync(userId: string) {
 export async function getUserSyncInfo(userId: string) {
   return prisma.user.findUnique({
     where: { id: userId },
-    select: { lastSyncAt: true, gmailConnected: true, syncEnabled: true },
+    select: {
+      lastSyncAt: true,
+      gmailConnected: true,
+      syncEnabled: true,
+      emailProviderReauthRequired: true,
+      emailProviderReauthReason: true,
+      emailProviderReauthAt: true,
+      emailProviderReauthProvider: true,
+    },
   })
 }
