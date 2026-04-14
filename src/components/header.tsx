@@ -50,14 +50,26 @@ export function Header() {
         type: 'active',
       })
       router.refresh()
-      const review = (data?.data?.review ?? null) as BatchClassificationReviewPayload | null
+      const syncData = data?.data as { syncedCount: number; skippedCount: number; failedCount: number; review?: BatchClassificationReviewPayload | null } | undefined
+      const review = (syncData?.review ?? null) as BatchClassificationReviewPayload | null
 
       if (review && review.items.length > 0) {
         setReviewPayload(review)
         setReviewOpen(true)
-        toast.success('Email sync complete, review new project guesses')
+      }
+
+      const synced = syncData?.syncedCount ?? 0
+      const skipped = syncData?.skippedCount ?? 0
+      const failed = syncData?.failedCount ?? 0
+      const hasPartial = skipped > 0 || failed > 0
+
+      if (hasPartial) {
+        const parts = [`Synced ${synced} emails`]
+        if (skipped > 0) parts.push(`${skipped} skipped`)
+        if (failed > 0) parts.push(`${failed} failed`)
+        toast.success(parts.join(', '))
       } else {
-        toast.success('Email sync complete')
+        toast.success(review && review.items.length > 0 ? 'Email sync complete, review new project guesses' : `Synced ${synced} emails`)
       }
     },
 

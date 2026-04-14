@@ -25,15 +25,22 @@ export async function storeEmail(data: StoreEmailData) {
     labels: JSON.stringify(data.message.labels),
     hasAttachments: data.message.hasAttachments,
   }
-  return prisma.email.upsert({
+  const existing = await prisma.email.findUnique({
     where: { gmailMessageId: data.message.providerMessageId },
-    create: fields,
-    update: {},
   })
+  if (existing) {
+    return { email: existing, wasCreated: false }
+  }
+  const email = await prisma.email.create({ data: fields })
+  return { email, wasCreated: true }
 }
 
 export async function storeEmails(userId: string, messages: EmailMessage[]) {
-  return Promise.all(messages.map((message) => storeEmail({ userId, message })))
+  const results = []
+  for (const message of messages) {
+    results.push(await storeEmail({ userId, message }))
+  }
+  return results
 }
 
 export async function updateClassification(

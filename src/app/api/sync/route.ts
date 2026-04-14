@@ -8,7 +8,7 @@ export async function POST() {
 
   try {
     const result = await syncEmails(user.id)
-    return success(result)
+    return success(result.data)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Email sync failed'
     console.error('Sync failed:', err)

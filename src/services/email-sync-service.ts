@@ -62,7 +62,19 @@ function buildBatchReviewPayload(items: PipelineReviewCandidate[]): BatchClassif
 // Fetch emails → store → run pipeline on each → update sync time
 // ============================================================
 
-export async function syncEmails(userId: string, sinceDays: number = 7) {
+export interface SyncResult {
+  success: true
+  data: {
+    totalFetched: number
+    syncedCount: number
+    skippedCount: number
+    failedCount: number
+    tasks: number
+    review: BatchClassificationReviewPayload | null
+  }
+}
+
+export async function syncEmails(userId: string, sinceDays: number = 7): Promise<SyncResult> {
   try {
     const syncInfo = await userRepo.getUserSyncInfo(userId)
 
@@ -83,7 +95,7 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
 
     if (messages.length === 0) {
       await userRepo.updateLastSync(userId)
-      return { synced: 0, tasks: 0, review: null }
+      return { success: true, data: { totalFetched: 0, syncedCount: 0, skippedCount: 0, failedCount: 0, tasks: 0, review: null } }
     }
 
     // 2) Store emails one-by-one so a single failure cannot prevent
@@ -91,13 +103,23 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
     //    first error (connection-pool exhaustion, payload issue, etc.)
     //    while earlier upserts had already committed — leaving emails
     //    in the DB but lastSyncAt still null.
-    const storedEmails: Awaited<ReturnType<typeof emailRepo.storeEmail>>[] = []
+    const storedEmails: Awaited<ReturnType<typeof emailRepo.storeEmail>>['email'][] = []
+    let syncedCount = 0
+    let skippedCount = 0
+    let failedCount = 0
+
     for (const message of messages) {
       try {
-        const stored = await emailRepo.storeEmail({ userId, message })
-        storedEmails.push(stored)
+        const { email, wasCreated } = await emailRepo.storeEmail({ userId, message })
+        storedEmails.push(email)
+        if (wasCreated) {
+          syncedCount++
+        } else {
+          skippedCount++
+        }
       } catch (err) {
-        console.error(`Failed to store email ${message.providerMessageId}:`, err)
+        failedCount++
+        console.error(`Failed to store email gmailMessageId=${message.providerMessageId}:`, err instanceof Error ? err.message : err)
       }
     }
 
@@ -135,9 +157,15 @@ export async function syncEmails(userId: string, sinceDays: number = 7) {
     }
 
     return {
-      synced: storedEmails.length,
-      tasks: tasksCreated,
-      review: buildBatchReviewPayload(reviewItems),
+      success: true,
+      data: {
+        totalFetched: messages.length,
+        syncedCount,
+        skippedCount,
+        failedCount,
+        tasks: tasksCreated,
+        review: buildBatchReviewPayload(reviewItems),
+      },
     }
   } catch (err) {
     console.error('syncEmails failed:', err)
