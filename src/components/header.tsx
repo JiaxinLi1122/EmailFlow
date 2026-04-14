@@ -9,11 +9,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { RefreshCw, User, LogOut, ChevronRight, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react'
+import { RefreshCw, User, LogOut, ChevronRight, CheckCircle2, AlertCircle, AlertTriangle, Loader2 } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
-import { BatchClassificationReviewDialog } from '@/components/batch-classification-review-dialog'
-import type { BatchClassificationReviewPayload } from '@/services/email-sync-service'
 import { isWorkspaceQueryKey } from '@/lib/query-cache'
 import {
   Dialog,
@@ -24,14 +22,18 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
+// How long to wait before doing a second refetch to pick up AI-created tasks.
+// AI pipeline typically takes 5–30s depending on email volume.
+const PROCESSING_REFETCH_DELAY_MS = 20_000
+
 interface SyncResultData {
   ok: boolean
   syncedCount: number
   skippedCount: number
   failedCount: number
-  retriedSuccessCount: number
-  retriedFailedCount: number
   pendingFailedCount: number
+  // True when new emails were stored — AI pipeline is running in the background
+  processing: boolean
   errorMessage?: string
 }
 
@@ -40,8 +42,6 @@ export function Header() {
   const queryClient = useQueryClient()
   const pathname = usePathname()
   const router = useRouter()
-  const [reviewPayload, setReviewPayload] = useState<BatchClassificationReviewPayload | null>(null)
-  const [reviewOpen, setReviewOpen] = useState(false)
   const [syncResult, setSyncResult] = useState<SyncResultData | null>(null)
   const [syncResultOpen, setSyncResultOpen] = useState(false)
 
@@ -61,11 +61,12 @@ export function Header() {
       return data
     },
 
-    onSuccess: async (data) => {
-      await queryClient.invalidateQueries({
+    onSuccess: (data) => {
+      // Invalidate immediately — emails are stored, they'll appear now.
+      queryClient.invalidateQueries({
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
       })
-      await queryClient.refetchQueries({
+      queryClient.refetchQueries({
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
         type: 'active',
       })
@@ -75,34 +76,40 @@ export function Header() {
         syncedCount: number
         skippedCount: number
         failedCount: number
-        retriedSuccessCount: number
-        retriedFailedCount: number
         pendingFailedCount: number
-        review?: BatchClassificationReviewPayload | null
+        processing: boolean
       } | undefined
 
-      const review = (syncData?.review ?? null) as BatchClassificationReviewPayload | null
-      if (review && review.items.length > 0) {
-        setReviewPayload(review)
-        setReviewOpen(true)
-      }
+      const processing = syncData?.processing ?? false
 
       setSyncResult({
         ok: true,
         syncedCount: syncData?.syncedCount ?? 0,
         skippedCount: syncData?.skippedCount ?? 0,
         failedCount: syncData?.failedCount ?? 0,
-        retriedSuccessCount: syncData?.retriedSuccessCount ?? 0,
-        retriedFailedCount: syncData?.retriedFailedCount ?? 0,
         pendingFailedCount: syncData?.pendingFailedCount ?? 0,
+        processing,
       })
       setSyncResultOpen(true)
+
+      // When AI is running in the background, do a second refetch after a delay
+      // to pick up newly created tasks without the user having to manually refresh.
+      if (processing) {
+        setTimeout(() => {
+          queryClient.invalidateQueries({
+            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+          })
+          queryClient.refetchQueries({
+            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
+            type: 'active',
+          })
+          router.refresh()
+        }, PROCESSING_REFETCH_DELAY_MS)
+      }
     },
 
     onError: (err) => {
       console.error('Sync failed:', err)
-      // Refetch stats even on failure — lastSyncAt may have been written before
-      // the error occurred, so the UI should reflect the current DB state.
       queryClient.invalidateQueries({
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
       })
@@ -115,9 +122,8 @@ export function Header() {
         syncedCount: 0,
         skippedCount: 0,
         failedCount: 0,
-        retriedSuccessCount: 0,
-        retriedFailedCount: 0,
         pendingFailedCount: 0,
+        processing: false,
         errorMessage: err instanceof Error ? err.message : 'Sync failed',
       })
       setSyncResultOpen(true)
@@ -161,23 +167,6 @@ export function Header() {
         </div>
       </header>
 
-      <BatchClassificationReviewDialog
-        open={reviewOpen}
-        onOpenChange={setReviewOpen}
-        payload={reviewPayload}
-        onConfirmed={async () => {
-          await queryClient.invalidateQueries({
-            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
-          })
-          await queryClient.refetchQueries({
-            predicate: (query) => isWorkspaceQueryKey(query.queryKey),
-            type: 'active',
-          })
-          router.refresh()
-          setReviewPayload(null)
-        }}
-      />
-
       <SyncResultDialog
         open={syncResultOpen}
         onClose={() => setSyncResultOpen(false)}
@@ -189,7 +178,6 @@ export function Header() {
 
 // ============================================================
 // Sync Result Dialog
-// Displayed after every sync attempt. Does not auto-close.
 // ============================================================
 
 interface SyncResultDialogProps {
@@ -201,10 +189,9 @@ interface SyncResultDialogProps {
 function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
   if (!result) return null
 
-  const { ok, syncedCount, skippedCount, failedCount, retriedSuccessCount, retriedFailedCount, pendingFailedCount, errorMessage } = result
+  const { ok, syncedCount, skippedCount, failedCount, pendingFailedCount, processing, errorMessage } = result
 
   const isPartial = ok && (failedCount > 0 || pendingFailedCount > 0)
-  const isPerfect = ok && failedCount === 0 && pendingFailedCount === 0
 
   const statusIcon = !ok
     ? <AlertCircle className="h-5 w-5 text-red-500" />
@@ -229,24 +216,27 @@ function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
 
         {ok ? (
           <ul className="space-y-1.5 text-sm text-gray-700">
-            <SyncLine label={`Synced ${syncedCount} email${syncedCount === 1 ? '' : 's'}`} />
+            {syncedCount > 0 ? (
+              <SyncLine label={`Synced ${syncedCount} email${syncedCount === 1 ? '' : 's'}`} />
+            ) : skippedCount > 0 ? (
+              <SyncLine label="No new emails" muted />
+            ) : (
+              <SyncLine label="No new emails" muted />
+            )}
             {skippedCount > 0 && (
-              <SyncLine label={`${skippedCount} skipped (already stored)`} muted />
+              <SyncLine label={`${skippedCount} already stored`} muted />
             )}
             {failedCount > 0 && (
               <SyncLine label={`${failedCount} failed to store`} warn />
             )}
-            {retriedSuccessCount > 0 && (
-              <SyncLine label={`Recovered ${retriedSuccessCount} previously failed email${retriedSuccessCount === 1 ? '' : 's'}`} success />
-            )}
             {pendingFailedCount > 0 && (
-              <SyncLine label={`${pendingFailedCount} failed email${pendingFailedCount === 1 ? '' : 's'} still pending retry`} warn />
+              <SyncLine label={`${pendingFailedCount} failed email${pendingFailedCount === 1 ? '' : 's'} pending retry`} warn />
             )}
-            {retriedFailedCount > 0 && pendingFailedCount === 0 && (
-              <SyncLine label={`${retriedFailedCount} email${retriedFailedCount === 1 ? '' : 's'} could not be recovered`} warn />
-            )}
-            {isPerfect && syncedCount === 0 && skippedCount === 0 && (
-              <SyncLine label="No new emails" muted />
+            {processing && (
+              <li className="flex items-center gap-2 text-blue-600 pt-0.5">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span>Classifying emails and extracting tasks...</span>
+              </li>
             )}
           </ul>
         ) : (
@@ -254,20 +244,21 @@ function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
         )}
 
         <DialogFooter showCloseButton={false}>
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose}>
+            {processing ? 'Close (continues in background)' : 'Close'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-function SyncLine({ label, muted, warn, success }: { label: string; muted?: boolean; warn?: boolean; success?: boolean }) {
+function SyncLine({ label, muted, warn }: { label: string; muted?: boolean; warn?: boolean }) {
   return (
     <li className={cn(
       'flex items-center gap-2',
       muted && 'text-gray-400',
       warn && 'text-amber-600',
-      success && 'text-green-600',
     )}>
       <span className="h-1 w-1 rounded-full bg-current opacity-60 shrink-0" />
       {label}

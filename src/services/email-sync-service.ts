@@ -59,124 +59,112 @@ function buildBatchReviewPayload(items: PipelineReviewCandidate[]): BatchClassif
 }
 
 // ============================================================
-// Email Sync Service
-// Fetch emails → store → run pipeline on each → update sync time
-// Then retry any previously failed emails from prior runs.
-// ============================================================
-
+// Email Sync Service — two-phase architecture
+//
+// Phase 1 (syncEmailsPhase1):
+//   Gmail fetch → email storage → updateLastSync
+//   Returns quickly (Gmail API + DB writes only, no AI)
+//
+// Phase 2 (syncEmailsPhase2):
+//   AI classification → task extraction → retry failed emails
+//   Runs via next/server `after()` so phase 1 response is sent first
+//
 // Maximum number of previously-failed emails to retry per sync run.
 // Caps retry overhead on syncs that have a large backlog.
+// ============================================================
+
 const RETRY_BATCH_SIZE = 10
 
-export interface SyncResult {
-  success: true
-  data: {
-    totalFetched: number
-    syncedCount: number
-    skippedCount: number
-    failedCount: number
-    retriedSuccessCount: number
-    retriedFailedCount: number
-    pendingFailedCount: number
-    tasks: number
-    review: BatchClassificationReviewPayload | null
-  }
+// Internal type alias for emails returned by storeEmail, passed from phase1 to phase2.
+type StoredEmail = Awaited<ReturnType<typeof emailRepo.storeEmail>>['email']
+
+export interface Phase1Result {
+  totalFetched: number
+  syncedCount: number
+  skippedCount: number
+  failedCount: number
+  pendingFailedCount: number
+  // Passed to syncEmailsPhase2 — not included in the HTTP response
+  storedEmails: StoredEmail[]
 }
 
-export async function syncEmails(userId: string, sinceDays: number = 7): Promise<SyncResult> {
+// ============================================================
+// Phase 1 — Gmail fetch + email storage
+// Called by the route handler. Returns before AI runs.
+// ============================================================
+
+export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): Promise<Phase1Result> {
   const t0 = Date.now()
-  try {
-    const syncInfo = await userRepo.getUserSyncInfo(userId)
 
-    if (!syncInfo) {
-      throw new Error('User not found')
-    }
+  const syncInfo = await userRepo.getUserSyncInfo(userId)
+  if (!syncInfo) throw new Error('User not found')
+  if (!syncInfo.gmailConnected) throw new Error('Gmail not connected')
+  if (!syncInfo.syncEnabled) throw new Error('Email sync is disabled')
 
-    if (!syncInfo.gmailConnected) {
-      throw new Error('Gmail not connected')
-    }
+  // 1) Fetch new emails from Gmail
+  const tFetch = Date.now()
+  const messages = await gmailProvider.fetchNewEmails(userId, sinceDays)
+  console.log(`[sync] fetchNewEmails: ${Date.now() - tFetch}ms, count=${messages.length}`)
 
-    if (!syncInfo.syncEnabled) {
-      throw new Error('Email sync is disabled')
-    }
+  // 2) Store emails one-by-one so a single failure cannot prevent
+  //    updateLastSync from running.  Promise.all would reject on the
+  //    first error while earlier upserts had already committed.
+  const tStore = Date.now()
+  const storedEmails: StoredEmail[] = []
+  let syncedCount = 0
+  let skippedCount = 0
+  let failedCount = 0
 
-    // 1) Fetch new emails from Gmail
-    const tFetch = Date.now()
-    const messages = await gmailProvider.fetchNewEmails(userId, sinceDays)
-    console.log(`[sync] fetchNewEmails: ${Date.now() - tFetch}ms, count=${messages.length}`)
-
-    // Early return when there is nothing new to process.
-    // updateLastSync still runs so the UI reflects the check time.
-    // Retry and AI pipeline are skipped — they only add latency when the inbox is quiet.
-    if (messages.length === 0) {
-      const tUpdateSync = Date.now()
-      await userRepo.updateLastSync(userId)
-      console.log(`[sync] updateLastSync: ${Date.now() - tUpdateSync}ms`)
-
-      const tCount = Date.now()
-      const pendingFailedCount = await failedRepo.countPendingFailures(userId)
-      console.log(`[sync] countPendingFailures: ${Date.now() - tCount}ms, pending=${pendingFailedCount}`)
-
-      console.log(`[sync] total (no new emails): ${Date.now() - t0}ms`)
-      return {
-        success: true,
-        data: {
-          totalFetched: 0,
-          syncedCount: 0,
-          skippedCount: 0,
-          failedCount: 0,
-          retriedSuccessCount: 0,
-          retriedFailedCount: 0,
-          pendingFailedCount,
-          tasks: 0,
-          review: null,
-        },
+  for (const message of messages) {
+    try {
+      const { email, wasCreated } = await emailRepo.storeEmail({ userId, message })
+      storedEmails.push(email)
+      if (wasCreated) {
+        syncedCount++
+      } else {
+        skippedCount++
       }
-    }
-
-    // 2) Store emails one-by-one so a single failure cannot prevent
-    //    updateLastSync from running.  Promise.all would reject on the
-    //    first error (connection-pool exhaustion, payload issue, etc.)
-    //    while earlier upserts had already committed — leaving emails
-    //    in the DB but lastSyncAt still null.
-    const tStore = Date.now()
-    const storedEmails: Awaited<ReturnType<typeof emailRepo.storeEmail>>['email'][] = []
-    let syncedCount = 0
-    let skippedCount = 0
-    let failedCount = 0
-
-    for (const message of messages) {
+    } catch (err) {
+      failedCount++
+      const reason = err instanceof Error ? err.message : String(err)
+      console.error(`Failed to store email gmailMessageId=${message.providerMessageId}: ${reason}`)
       try {
-        const { email, wasCreated } = await emailRepo.storeEmail({ userId, message })
-        storedEmails.push(email)
-        if (wasCreated) {
-          syncedCount++
-        } else {
-          skippedCount++
-        }
-      } catch (err) {
-        failedCount++
-        const reason = err instanceof Error ? err.message : String(err)
-        console.error(`Failed to store email gmailMessageId=${message.providerMessageId}: ${reason}`)
-        // Persist for later retry — upsert so repeated failures don't create duplicates
-        try {
-          await failedRepo.recordFailedEmail(userId, message, reason)
-        } catch (recordErr) {
-          console.error(`Failed to record failed email gmailMessageId=${message.providerMessageId}:`, recordErr)
-        }
+        await failedRepo.recordFailedEmail(userId, message, reason)
+      } catch (recordErr) {
+        console.error(`Failed to record failed email gmailMessageId=${message.providerMessageId}:`, recordErr)
       }
     }
-    console.log(`[sync] storeEmails: ${Date.now() - tStore}ms, synced=${syncedCount}, skipped=${skippedCount}, failed=${failedCount}`)
+  }
+  console.log(`[sync] storeEmails: ${Date.now() - tStore}ms, synced=${syncedCount}, skipped=${skippedCount}, failed=${failedCount}`)
 
-    // 3) Mark sync time now — before AI pipeline so it's persisted even if
-    //    downstream processing is slow or the request times out
-    const tUpdateSync = Date.now()
-    await userRepo.updateLastSync(userId)
-    console.log(`[sync] updateLastSync: ${Date.now() - tUpdateSync}ms`)
+  // 3) Mark sync time — persisted before AI pipeline so it's recorded even
+  //    if downstream processing is slow or never completes.
+  const tUpdate = Date.now()
+  await userRepo.updateLastSync(userId)
+  console.log(`[sync] updateLastSync: ${Date.now() - tUpdate}ms`)
 
-    // 4) Run email processing pipeline on each stored email
+  // 4) Count pending failures for the response display
+  const tCount = Date.now()
+  const pendingFailedCount = await failedRepo.countPendingFailures(userId)
+  console.log(`[sync] countPendingFailures: ${Date.now() - tCount}ms, pending=${pendingFailedCount}`)
+
+  console.log(`[sync] phase1 total: ${Date.now() - t0}ms`)
+
+  return { totalFetched: messages.length, syncedCount, skippedCount, failedCount, pendingFailedCount, storedEmails }
+}
+
+// ============================================================
+// Phase 2 — AI pipeline + retry work
+// Scheduled via next/server after() so it runs after the
+// HTTP response is already sent. Never blocks the user.
+// ============================================================
+
+export async function syncEmailsPhase2(userId: string, storedEmails: StoredEmail[]): Promise<void> {
+  const t0 = Date.now()
+
+  // 1) Run email processing pipeline on each newly stored email
+  if (storedEmails.length > 0) {
     const tAI = Date.now()
-    let tasksCreated = 0
     const reviewItems: PipelineReviewCandidate[] = []
 
     for (const email of storedEmails) {
@@ -192,55 +180,38 @@ export async function syncEmails(userId: string, sinceDays: number = 7): Promise
           threadId: email.threadId,
         })
 
-        if (result?.taskCreated) {
-          tasksCreated += 1
-        }
-
         if (result?.reviewCandidate) {
           reviewItems.push(result.reviewCandidate)
         }
       } catch (err) {
-        console.error(`Failed to process email ${email.id}:`, err)
+        console.error(`[sync] phase2 failed to process email ${email.id}:`, err)
       }
     }
-    console.log(`[sync] aiPipeline: ${Date.now() - tAI}ms, processed=${storedEmails.length}, tasks=${tasksCreated}`)
 
-    // 5) Retry previously failed emails (capped at RETRY_BATCH_SIZE per run).
-    //    Runs after the main flow so normal sync always takes priority.
-    //    loadPendingFailures excludes resolved and permanent_failed records.
-    const tRetry = Date.now()
-    const { retriedSuccessCount, retriedFailedCount, pendingFailedCount } = await retryFailedEmails(userId)
-    console.log(`[sync] retryFailedEmails: ${Date.now() - tRetry}ms, success=${retriedSuccessCount}, failed=${retriedFailedCount}, remaining=${pendingFailedCount}`)
-
-    console.log(`[sync] total: ${Date.now() - t0}ms`)
-    return {
-      success: true,
-      data: {
-        totalFetched: messages.length,
-        syncedCount,
-        skippedCount,
-        failedCount,
-        retriedSuccessCount,
-        retriedFailedCount,
-        pendingFailedCount,
-        tasks: tasksCreated,
-        review: buildBatchReviewPayload(reviewItems),
-      },
+    const reviewPayload = buildBatchReviewPayload(reviewItems)
+    if (reviewPayload) {
+      console.log(`[sync] phase2 review items: ${reviewItems.length} (stored for future use)`)
     }
-  } catch (err) {
-    console.error('syncEmails failed:', err)
-    throw err
+
+    console.log(`[sync] phase2 aiPipeline: ${Date.now() - tAI}ms, processed=${storedEmails.length}`)
   }
+
+  // 2) Retry previously failed emails (capped at RETRY_BATCH_SIZE per run)
+  const tRetry = Date.now()
+  const { retriedSuccessCount, retriedFailedCount } = await retryFailedEmails(userId)
+  console.log(`[sync] phase2 retryFailedEmails: ${Date.now() - tRetry}ms, success=${retriedSuccessCount}, failed=${retriedFailedCount}`)
+
+  console.log(`[sync] phase2 total: ${Date.now() - t0}ms`)
 }
 
 // ============================================================
-// Retry loop — runs at the end of each successful sync run.
+// Retry loop — runs in phase 2 after every sync run.
 // Loads pending/retrying records, tries to store them again.
 // If storeEmail returns wasCreated=false the email already
 // exists (stored by another path) — treat that as resolved.
 // ============================================================
 
-async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount: number; retriedFailedCount: number; pendingFailedCount: number }> {
+async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount: number; retriedFailedCount: number }> {
   let retriedSuccessCount = 0
   let retriedFailedCount = 0
 
@@ -249,7 +220,7 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
     allPendingRecords = await failedRepo.loadPendingFailures(userId)
   } catch (err) {
     console.error('Failed to load pending retry records:', err)
-    return { retriedSuccessCount, retriedFailedCount, pendingFailedCount: 0 }
+    return { retriedSuccessCount, retriedFailedCount }
   }
 
   // Process only a bounded batch per run — keeps retry overhead predictable
@@ -258,8 +229,6 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
 
   for (const record of pendingRecords) {
     try {
-      // Reconstruct the minimal EmailMessage shape needed by storeEmail.
-      // Fields that weren't captured are omitted; storeEmail handles nulls.
       const { wasCreated } = await emailRepo.storeEmail({
         userId,
         message: {
@@ -268,7 +237,6 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
           receivedAt: record.receivedAt ?? new Date(),
           subject: record.subject ?? '(no subject)',
           sender: record.sender ?? '',
-          // Fields not available from the retry record — use safe defaults
           recipients: [],
           bodyPreview: '',
           bodyFull: '',
@@ -278,8 +246,6 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
         },
       })
 
-      // wasCreated=false means the email was already stored (e.g. by the
-      // main flow above or a prior sync) — still counts as resolved.
       retriedSuccessCount++
       await failedRepo.resolveFailedEmail(userId, record.gmailMessageId)
       console.log(`Retry resolved gmailMessageId=${record.gmailMessageId} wasCreated=${wasCreated}`)
@@ -295,10 +261,5 @@ async function retryFailedEmails(userId: string): Promise<{ retriedSuccessCount:
     }
   }
 
-  // Remaining count: total pending minus the ones we just resolved in this batch.
-  // This avoids an extra DB query — it's an estimate based on what we loaded, which
-  // is accurate enough for the sync response display.
-  const pendingFailedCount = Math.max(0, allPendingRecords.length - retriedSuccessCount)
-
-  return { retriedSuccessCount, retriedFailedCount, pendingFailedCount }
+  return { retriedSuccessCount, retriedFailedCount }
 }
