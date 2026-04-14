@@ -1,4 +1,4 @@
-import { google } from 'googleapis'
+import { google, gmail_v1 } from 'googleapis'
 import { prisma } from '@/lib/prisma'
 import type { EmailProvider, EmailMessage, NormalizedCategory } from '../email-provider'
 
@@ -56,18 +56,21 @@ function decodeBase64Url(data: string): string {
   return buff.toString('utf-8')
 }
 
-function extractBody(payload: any): string {
-  if (payload.body?.data) {
-    return decodeBase64Url(payload.body.data)
+function extractBody(payload: gmail_v1.Schema$MessagePart): string {
+  const bodyData = payload.body?.data
+  if (bodyData) {
+    return decodeBase64Url(bodyData)
   }
   if (payload.parts) {
-    const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain')
-    if (textPart?.body?.data) {
-      return decodeBase64Url(textPart.body.data)
+    const textPart = payload.parts.find((p) => p.mimeType === 'text/plain')
+    const textData = textPart?.body?.data
+    if (textData) {
+      return decodeBase64Url(textData)
     }
-    const htmlPart = payload.parts.find((p: any) => p.mimeType === 'text/html')
-    if (htmlPart?.body?.data) {
-      const html = decodeBase64Url(htmlPart.body.data)
+    const htmlPart = payload.parts.find((p) => p.mimeType === 'text/html')
+    const htmlData = htmlPart?.body?.data
+    if (htmlData) {
+      const html = decodeBase64Url(htmlData)
       return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
     }
     for (const part of payload.parts) {
@@ -80,8 +83,8 @@ function extractBody(payload: any): string {
   return ''
 }
 
-function getHeader(headers: any[], name: string): string {
-  const h = headers?.find((h: any) => h.name.toLowerCase() === name.toLowerCase())
+function getHeader(headers: gmail_v1.Schema$MessagePartHeader[], name: string): string {
+  const h = headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())
   return h?.value || ''
 }
 
@@ -109,7 +112,7 @@ function mapGmailLabelsToCategories(labels: string[]): NormalizedCategory[] {
 export const gmailProvider: EmailProvider = {
   name: 'gmail',
 
-  async fetchNewEmails(userId: string, _sinceDays: number = 7): Promise<EmailMessage[]> {
+  async fetchNewEmails(userId: string): Promise<EmailMessage[]> {
     const auth = await getAuthenticatedClient(userId)
     const gmail = google.gmail({ version: 'v1', auth })
 
@@ -194,7 +197,7 @@ export const gmailProvider: EmailProvider = {
 
         const recipients = [to, cc].filter(Boolean)
         const hasAttachments = !!(
-          msg.payload.parts?.some((p: any) => p.filename && p.filename.length > 0)
+          msg.payload.parts?.some((p) => p.filename && p.filename.length > 0)
         )
 
         const gmailLabels = msg.labelIds || []
