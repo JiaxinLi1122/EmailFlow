@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
 import { getAuthUser, success, error } from '@/lib/api-helpers'
 import * as taskRepo from '@/repositories/task-repo'
+import { invalidateStatsCache } from '@/repositories/stats-repo'
 import { prisma } from '@/lib/prisma'
 
 const EMPTY_LIST = { success: true, data: [], meta: { page: 1, totalPages: 0, totalCount: 0 } }
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    invalidateStatsCache(user.id)
     return success(task)
   } catch (err) {
     console.error('[api/tasks POST]', err)

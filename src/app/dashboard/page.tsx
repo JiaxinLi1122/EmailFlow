@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { getEmailClassConfig } from '@/lib/email-classification'
 import { useAuth } from '@/lib/use-auth'
@@ -87,46 +88,34 @@ export default function DashboardPage() {
     setShowSyncModal(false)
     router.replace('/dashboard', { scroll: false })
   }
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
     staleTime: CACHE_TIME.stats,
   })
 
-  const { data: confirmedRes } = useQuery({
-    queryKey: ['tasks', 'confirmed'],
-    queryFn: () => fetch('/api/tasks?status=confirmed&sort=priority&limit=5').then((r) => r.json()),
+  const { data: allTasksRes, isLoading: tasksLoading } = useQuery({
+    queryKey: ['tasks', 'dashboard'],
+    queryFn: () => fetch('/api/tasks?limit=50&sort=priority').then((r) => r.json()),
     staleTime: CACHE_TIME.list,
   })
 
-  const { data: pendingRes } = useQuery({
-    queryKey: ['tasks', 'pending'],
-    queryFn: () => fetch('/api/tasks?status=pending&sort=priority&limit=5').then((r) => r.json()),
-    staleTime: CACHE_TIME.list,
-  })
-
-  const { data: allTasksRes } = useQuery({
-    queryKey: ['tasks', 'all-for-kpi'],
-    queryFn: () => fetch('/api/tasks?limit=50').then((r) => r.json()),
-    staleTime: CACHE_TIME.list,
-  })
-
-  const { data: emailsRes } = useQuery({
+  const { data: emailsRes, isLoading: emailsLoading } = useQuery({
     queryKey: ['emails', 'for-dashboard'],
     queryFn: () => fetch('/api/emails?limit=50').then((r) => r.json()),
     staleTime: CACHE_TIME.list,
   })
 
-  const { data: mattersRes } = useQuery({
+  const { data: mattersRes, isLoading: mattersLoading } = useQuery({
     queryKey: ['matters', 'for-dashboard'],
     queryFn: () => fetch('/api/matters').then((r) => r.json()),
     staleTime: CACHE_TIME.stats,
   })
 
   const s = stats?.data
-  const confirmedTasks = confirmedRes?.data || []
-  const pendingTasks = pendingRes?.data || []
   const allTasks: DashboardTask[] = allTasksRes?.data || []
+  const confirmedTasks = allTasks.filter((t) => t.status === 'confirmed').slice(0, 5)
+  const pendingTasks = allTasks.filter((t) => t.status === 'pending').slice(0, 5)
   const allEmails: DashboardEmail[] = emailsRes?.data || []
   const matters = useMemo(() => ((mattersRes?.data || []) as DashboardMatter[]), [mattersRes?.data])
 
@@ -239,99 +228,125 @@ export default function DashboardPage() {
       )}
 
       <div className="animate-fade-in-up stagger-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Emails Processed"
-          value={emailData.total}
-          icon={<Mail className="h-4 w-4 text-blue-600" />}
-          detail={`${emailData.action} action, ${emailData.awareness} FYI`}
-        />
-        <StatCard
-          title="Active Tasks"
-          value={confirmedTaskCount + pendingTaskCount}
-          icon={<CheckSquare className="h-4 w-4 text-green-600" />}
-          detail={`${completedTasks} completed of ${totalTasks}`}
-        />
-        <StatCard
-          title="Due This Week"
-          value={upcomingCount}
-          icon={<Target className="h-4 w-4 text-orange-500" />}
-          detail="Pending deadlines in 7 days"
-        />
-        <StatCard
-          title="Last Synced"
-          value={s?.sync?.lastSyncAt ? timeAgo(s.sync.lastSyncAt) : 'Never'}
-          icon={<Clock className="h-4 w-4 text-gray-500" />}
-          detail={s?.sync?.gmailConnected ? 'Gmail connected' : 'Not connected'}
-        />
+        {statsLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard
+              title="Emails Processed"
+              value={emailData.total}
+              icon={<Mail className="h-4 w-4 text-blue-600" />}
+              detail={`${emailData.action} action, ${emailData.awareness} FYI`}
+            />
+            <StatCard
+              title="Active Tasks"
+              value={confirmedTaskCount + pendingTaskCount}
+              icon={<CheckSquare className="h-4 w-4 text-green-600" />}
+              detail={`${completedTasks} completed of ${totalTasks}`}
+            />
+            <StatCard
+              title="Due This Week"
+              value={upcomingCount}
+              icon={<Target className="h-4 w-4 text-orange-500" />}
+              detail="Pending deadlines in 7 days"
+            />
+            <StatCard
+              title="Last Synced"
+              value={s?.sync?.lastSyncAt ? timeAgo(s.sync.lastSyncAt) : 'Never'}
+              icon={<Clock className="h-4 w-4 text-gray-500" />}
+              detail={s?.sync?.gmailConnected ? 'Gmail connected' : 'Not connected'}
+            />
+          </>
+        )}
       </div>
 
       <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="border-gray-200/80 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <PieChart className="h-4 w-4 text-green-600" />
-              Task Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-6">
-              <DonutChart
-                value={completionRate}
-                size={100}
-                color={completionRate >= 70 ? '#22c55e' : completionRate >= 40 ? '#f59e0b' : '#ef4444'}
-              />
-              <div className="space-y-1.5 text-sm">
-                <LegendDot color="bg-green-500" label={`Completed: ${completedTasks}`} />
-                <LegendDot color="bg-blue-500" label={`Confirmed: ${confirmedTaskCount}`} />
-                <LegendDot color="bg-purple-500" label={`Pending: ${pendingTaskCount}`} />
-                <LegendDot color="bg-gray-300" label={`Dismissed: ${dismissedTaskCount}`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {(statsLoading || tasksLoading) ? (
+          <>
+            <ChartCardSkeleton />
+            <ChartCardSkeleton />
+            <ChartCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card className="border-gray-200/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <PieChart className="h-4 w-4 text-green-600" />
+                  Task Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-6">
+                  <DonutChart
+                    value={completionRate}
+                    size={100}
+                    color={completionRate >= 70 ? '#22c55e' : completionRate >= 40 ? '#f59e0b' : '#ef4444'}
+                  />
+                  <div className="space-y-1.5 text-sm">
+                    <LegendDot color="bg-green-500" label={`Completed: ${completedTasks}`} />
+                    <LegendDot color="bg-blue-500" label={`Confirmed: ${confirmedTaskCount}`} />
+                    <LegendDot color="bg-purple-500" label={`Pending: ${pendingTaskCount}`} />
+                    <LegendDot color="bg-gray-300" label={`Dismissed: ${dismissedTaskCount}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card className="border-gray-200/80 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <BarChart3 className="h-4 w-4 text-blue-600" />
-              Email Classification
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2.5">
-              <BarRow label="Action" value={emailData.action} max={emailData.total} color="bg-red-400" />
-              <BarRow label="Awareness" value={emailData.awareness} max={emailData.total} color="bg-blue-400" />
-              <BarRow label="Uncertain" value={emailData.uncertain} max={emailData.total} color="bg-yellow-400" />
-              <BarRow label="Ignored" value={emailData.ignore} max={emailData.total} color="bg-gray-300" />
-            </div>
-          </CardContent>
-        </Card>
+            <Card className="border-gray-200/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <BarChart3 className="h-4 w-4 text-blue-600" />
+                  Email Classification
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2.5">
+                  <BarRow label="Action" value={emailData.action} max={emailData.total} color="bg-red-400" />
+                  <BarRow label="Awareness" value={emailData.awareness} max={emailData.total} color="bg-blue-400" />
+                  <BarRow label="Uncertain" value={emailData.uncertain} max={emailData.total} color="bg-yellow-400" />
+                  <BarRow label="Ignored" value={emailData.ignore} max={emailData.total} color="bg-gray-300" />
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card className="border-gray-200/80 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-orange-500" />
-              Priority Distribution
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2.5">
-              <BarRow label="Critical" value={priorityCounts.critical} max={allTasks.length || 1} color="bg-red-500" />
-              <BarRow label="High" value={priorityCounts.high} max={allTasks.length || 1} color="bg-orange-400" />
-              <BarRow label="Medium" value={priorityCounts.medium} max={allTasks.length || 1} color="bg-yellow-400" />
-              <BarRow label="Low" value={priorityCounts.low} max={allTasks.length || 1} color="bg-gray-300" />
-            </div>
-            <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2">
-              <Target className="h-3.5 w-3.5 text-blue-600" />
-              <span className="text-xs text-blue-700">
-                AI extraction rate: <strong>{actionToTask}%</strong> of action emails to tasks
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+            <Card className="border-gray-200/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <TrendingUp className="h-4 w-4 text-orange-500" />
+                  Priority Distribution
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2.5">
+                  <BarRow label="Critical" value={priorityCounts.critical} max={allTasks.length || 1} color="bg-red-500" />
+                  <BarRow label="High" value={priorityCounts.high} max={allTasks.length || 1} color="bg-orange-400" />
+                  <BarRow label="Medium" value={priorityCounts.medium} max={allTasks.length || 1} color="bg-yellow-400" />
+                  <BarRow label="Low" value={priorityCounts.low} max={allTasks.length || 1} color="bg-gray-300" />
+                </div>
+                <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2">
+                  <Target className="h-3.5 w-3.5 text-blue-600" />
+                  <span className="text-xs text-blue-700">
+                    AI extraction rate: <strong>{actionToTask}%</strong> of action emails to tasks
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
-      {(activeIdentities.length > 0 || activeProjects.length > 0) && (
+      {mattersLoading ? (
+        <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <IdentityCardSkeleton />
+          <IdentityCardSkeleton />
+        </div>
+      ) : (activeIdentities.length > 0 || activeProjects.length > 0) && (
         <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="border-sky-200/80 bg-[linear-gradient(180deg,rgba(240,249,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
@@ -402,7 +417,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {(pendingTasks.length > 0 || attentionEmails.length > 0) && (
+      {(tasksLoading || emailsLoading) ? (
+        <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ListCardSkeleton />
+          <ListCardSkeleton />
+        </div>
+      ) : (pendingTasks.length > 0 || attentionEmails.length > 0) && (
         <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="border-purple-200/80 bg-[linear-gradient(180deg,rgba(250,245,255,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
             <CardHeader className="pb-2">
@@ -503,7 +523,19 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {confirmedTasks.length === 0 ? (
+          {tasksLoading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Skeleton className="h-4 w-3/5" />
+                    <Skeleton className="h-3 w-2/5" />
+                  </div>
+                  <Skeleton className="ml-3 h-5 w-16 shrink-0" />
+                </div>
+              ))}
+            </div>
+          ) : confirmedTasks.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <CheckSquare className="h-8 w-8 text-gray-200" />
               <p className="text-sm text-gray-400">No confirmed tasks yet.</p>
@@ -585,6 +617,91 @@ export default function DashboardPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/* ========== SKELETON COMPONENTS ========== */
+
+function StatCardSkeleton() {
+  return (
+    <Card className="border-gray-200/80 shadow-sm">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-4 rounded-full" />
+        </div>
+        <Skeleton className="mt-2 h-8 w-16" />
+        <Skeleton className="mt-1 h-3 w-32" />
+      </CardContent>
+    </Card>
+  )
+}
+
+function ChartCardSkeleton() {
+  return (
+    <Card className="border-gray-200/80 shadow-sm">
+      <CardHeader className="pb-2">
+        <Skeleton className="h-4 w-32" />
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-4/5" />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function IdentityCardSkeleton() {
+  return (
+    <Card className="border-gray-200/80 shadow-sm">
+      <CardHeader className="pb-2">
+        <Skeleton className="h-4 w-36" />
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-3">
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-48" />
+              </div>
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ListCardSkeleton() {
+  return (
+    <Card className="border-gray-200/80 shadow-sm">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-12" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-1.5">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2.5">
+              <Skeleton className="h-7 w-1 shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
+              </div>
+              <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

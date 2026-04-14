@@ -104,9 +104,21 @@ export async function findEmailsPaginated(
       orderBy: { receivedAt: 'desc' },
       skip: (options.page - 1) * options.limit,
       take: options.limit,
-      include: {
+      select: {
+        id: true,
+        subject: true,
+        sender: true,
+        bodyPreview: true,
+        receivedAt: true,
+        classification: true,
+        accountEmail: true,
+        hasAttachments: true,
+        threadId: true,
         taskLinks: {
-          include: { task: { select: { id: true, title: true, status: true } } },
+          select: {
+            id: true,
+            task: { select: { id: true, title: true, status: true } },
+          },
         },
       },
     }),

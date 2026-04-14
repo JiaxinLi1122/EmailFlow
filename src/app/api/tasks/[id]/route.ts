@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getAuthUser, success, error } from '@/lib/api-helpers'
 import * as taskRepo from '@/repositories/task-repo'
+import { invalidateStatsCache } from '@/repositories/stats-repo'
 
 type AllowedTaskField =
   | 'title'
@@ -123,5 +124,6 @@ export async function PATCH(
   }
 
   const updated = await taskRepo.updateTask(id, data)
+  if (body.status !== undefined) invalidateStatsCache(user.id)
   return success(updated)
 }

@@ -95,6 +95,9 @@ model Email {
 
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   taskLinks TaskEmail[]
+
+  @@index([userId, receivedAt(sort: Desc)])
+  @@index([userId, classification, receivedAt(sort: Desc)])
 }
 
 model Task {
