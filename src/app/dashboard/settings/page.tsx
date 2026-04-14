@@ -9,10 +9,13 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InlineNotice } from '@/components/inline-notice'
 import { PageHeader } from '@/components/page-header'
 import {
+  AlertTriangle,
   CalendarIcon,
   Clock3,
   Check,
@@ -24,10 +27,13 @@ import {
   MonitorSmartphone,
   Mail,
   Shield,
+  ShieldOff,
+  Trash2,
   Unplug,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CACHE_TIME } from '@/lib/query-cache'
+import { requestStepUp, verifyStepUp, type StepUpAction } from '@/lib/step-up-client'
 
 type CurrentUser = {
   email?: string | null
@@ -35,6 +41,7 @@ type CurrentUser = {
   name?: string | null
   syncStartDate?: string | null
   timezone?: string | null
+  totpEnabled?: boolean | null
   currentSessionId?: string | null
 }
 
@@ -346,7 +353,13 @@ export default function SettingsPage() {
 
       <PasswordCard />
 
+      <ChangePasswordCard />
+
+      <TwoFactorCard totpEnabled={Boolean(currentUser?.totpEnabled)} onDisabled={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })} />
+
       <DeviceSessionsCard currentSessionId={currentUser?.currentSessionId || null} onLogoutCurrent={() => logout()} />
+
+      <DangerZoneCard onDeleted={() => logout()} />
 
       <Card className="border-white/80 bg-white/95 shadow-sm">
         <CardHeader className="pb-3">
@@ -922,5 +935,412 @@ function DeviceSessionsCard({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Step-Up dialog — reusable modal for TOTP / email OTP verification
+// ---------------------------------------------------------------------------
+
+function StepUpDialog({
+  open,
+  action,
+  method,
+  onClose,
+  onVerified,
+}: {
+  open: boolean
+  action: StepUpAction
+  method: 'totp' | 'email'
+  onClose: () => void
+  onVerified: (token: string) => void
+}) {
+  const [code, setCode] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const token = await verifyStepUp(action, code.trim())
+      onVerified(token)
+      setCode('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid code')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-blue-700" />
+            Verify your identity
+          </DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
+          <div className="space-y-1.5">
+            <Label htmlFor="step-up-code">
+              {method === 'totp'
+                ? 'Enter the 6-digit code from your authenticator app'
+                : 'Enter the verification code sent to your email'}
+            </Label>
+            <Input
+              id="step-up-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="000000"
+              maxLength={6}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              required
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading || code.trim().length < 4}>
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Verify'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ChangePasswordCard
+// ---------------------------------------------------------------------------
+
+function ChangePasswordCard() {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [method, setMethod] = useState<'totp' | 'email'>('email')
+  const [stepUpToken, setStepUpToken] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
+  async function handleRequestStepUp() {
+    setError('')
+    setLoading(true)
+    try {
+      const { method: m } = await requestStepUp('change_password')
+      setMethod(m)
+      setDialogOpen(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start verification')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!stepUpToken) return
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword, stepUpToken }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Failed to change password')
+      setSuccess(true)
+      setStepUpToken(null)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      toast.success('Password changed successfully')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to change password')
+      setStepUpToken(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleVerified(token: string) {
+    setDialogOpen(false)
+    setStepUpToken(token)
+  }
+
+  return (
+    <>
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Shield className="h-4 w-4 text-blue-700" />
+            Change Password
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
+          {success ? (
+            <InlineNotice variant="success">
+              <div className="flex flex-1 items-center justify-between gap-3">
+                <p className="text-sm font-medium">Password updated successfully</p>
+                <Button variant="ghost" size="sm" onClick={() => setSuccess(false)}>Dismiss</Button>
+              </div>
+            </InlineNotice>
+          ) : stepUpToken ? (
+            <form onSubmit={handleChangePassword} className="space-y-3">
+              <p className="text-sm text-green-700 font-medium">Identity verified. Enter your new password.</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="cp-current">Current password</Label>
+                <Input id="cp-current" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required autoComplete="current-password" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cp-new">New password</Label>
+                <Input id="cp-new" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required autoComplete="new-password" minLength={8} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cp-confirm">Confirm new password</Label>
+                <Input id="cp-confirm" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="ghost" onClick={() => { setStepUpToken(null); setError('') }}>Cancel</Button>
+                <Button type="submit" disabled={loading}>
+                  {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Update password'}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-semibold text-gray-900">Change your password directly</p>
+                <p className="text-sm text-gray-500">Requires identity re-verification via your authenticator app or email code.</p>
+              </div>
+              <Button size="sm" onClick={handleRequestStepUp} disabled={loading} className="self-end gap-2 sm:self-auto">
+                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                Change password
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <StepUpDialog open={dialogOpen} action="change_password" method={method} onClose={() => setDialogOpen(false)} onVerified={handleVerified} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TwoFactorCard
+// ---------------------------------------------------------------------------
+
+function TwoFactorCard({ totpEnabled, onDisabled }: { totpEnabled: boolean; onDisabled: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [method, setMethod] = useState<'totp' | 'email'>('email')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleRequestDisable() {
+    setError('')
+    setLoading(true)
+    try {
+      const { method: m } = await requestStepUp('disable_totp')
+      setMethod(m)
+      setDialogOpen(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start verification')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVerified(token: string) {
+    setDialogOpen(false)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/totp/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stepUpToken: token }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Failed to disable 2FA')
+      toast.success('Two-factor authentication disabled')
+      onDisabled()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disable 2FA')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <Card className="border-white/80 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Shield className="h-4 w-4 text-blue-700" />
+            Two-Factor Authentication
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
+          <div className="flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-900">Authenticator app (TOTP)</p>
+                {totpEnabled ? (
+                  <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Enabled</Badge>
+                ) : (
+                  <Badge variant="outline">Disabled</Badge>
+                )}
+              </div>
+              <p className="text-sm text-gray-500">
+                {totpEnabled
+                  ? 'Your account is protected with a time-based one-time password.'
+                  : 'Add an extra layer of security with an authenticator app.'}
+              </p>
+            </div>
+            {totpEnabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRequestDisable}
+                disabled={loading}
+                className="gap-2 self-end border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700 sm:self-auto"
+              >
+                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
+                Disable 2FA
+              </Button>
+            ) : (
+              <a href="/auth/totp-setup" className="self-end sm:self-auto">
+                <Button size="sm" className="gap-2">
+                  <Shield className="h-3.5 w-3.5" />
+                  Enable 2FA
+                </Button>
+              </a>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <StepUpDialog open={dialogOpen} action="disable_totp" method={method} onClose={() => setDialogOpen(false)} onVerified={handleVerified} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DangerZoneCard
+// ---------------------------------------------------------------------------
+
+function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [method, setMethod] = useState<'totp' | 'email'>('email')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleRequestDelete() {
+    setConfirmOpen(false)
+    setError('')
+    setLoading(true)
+    try {
+      const { method: m } = await requestStepUp('delete_account')
+      setMethod(m)
+      setDialogOpen(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start verification')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVerified(token: string) {
+    setDialogOpen(false)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stepUpToken: token }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Failed to delete account')
+      toast.success('Account deleted')
+      onDeleted()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete account')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <Card className="border-red-200/60 bg-white/95 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-red-700">
+            <AlertTriangle className="h-4 w-4" />
+            Danger Zone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && <InlineNotice variant="error">{error}</InlineNotice>}
+          <div className="flex flex-col gap-4 rounded-2xl border border-red-200/60 bg-red-50/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-semibold text-gray-900">Delete this account</p>
+              <p className="text-sm text-gray-500">
+                Permanently removes your account and all associated data. This cannot be undone.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={loading}
+              className="gap-2 self-end border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700 sm:self-auto"
+            >
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Delete account
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Confirmation dialog before step-up */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="h-4 w-4" />
+              Delete your account?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            This will permanently delete your account, all emails, tasks, and connected data.
+            There is <strong>no way to undo this</strong>.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleRequestDelete} disabled={loading}>
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Yes, delete my account'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <StepUpDialog open={dialogOpen} action="delete_account" method={method} onClose={() => setDialogOpen(false)} onVerified={handleVerified} />
+    </>
   )
 }

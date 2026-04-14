@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { sendNewDeviceLoginEmail } from '@/lib/mailer'
+import { sendNewDeviceLoginEmail, sendSuspiciousActivityEmail } from '@/lib/mailer'
 import {
   SESSION_MAX_AGE_DEFAULT_SECONDS,
   SESSION_MAX_AGE_REMEMBER_SECONDS,
@@ -12,6 +13,8 @@ const EXPIRED_STATUS = 'expired'
 const REVOKED_STATUS = 'revoked'
 const LAST_ACTIVE_UPDATE_INTERVAL_MS = 5 * 60 * 1000
 const MAX_ACTIVE_SESSIONS = 3
+// After rotation, the old token is accepted for this many ms (handles in-flight concurrent requests)
+const ROTATION_GRACE_PERIOD_MS = 30 * 1000
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet' | 'bot' | 'unknown'
 
@@ -304,28 +307,82 @@ function queueNewDeviceAlert(input: {
   })
 }
 
+function queueSuspiciousActivityAlert(input: {
+  userId: string
+  userEmail: string
+  reason: 'rotated_token_replay'
+  ipAddress: string
+  deviceName: string
+}) {
+  setImmediate(async () => {
+    try {
+      await sendSuspiciousActivityEmail({
+        to: input.userEmail,
+        reason: input.reason,
+        ipAddress: input.ipAddress,
+        deviceName: input.deviceName,
+      })
+    } catch (err) {
+      console.error('[auth-sessions] Failed to send suspicious activity alert', err)
+    }
+  })
+}
+
 async function handleSuspiciousLoginSignal() {
-  // Reserved hook for future anomaly detection like impossible travel or geo mismatch.
+  // Reserved hook for additional anomaly detection (impossible travel, geo mismatch, etc.)
+}
+
+const SESSION_INCLUDE = {
+  user: { select: { id: true, email: true, name: true } },
+} as const satisfies Prisma.SessionInclude
+
+type SessionWithUser = Prisma.SessionGetPayload<{ include: typeof SESSION_INCLUDE }>
+
+/** Resolve which session record to use for the given token hash, handling rotation replay. */
+async function resolveSession(hash: string, now: Date): Promise<SessionWithUser | null> {
+  // Primary: token is the current active token
+  const primary = await prisma.session.findUnique({ where: { tokenHash: hash }, include: SESSION_INCLUDE })
+  if (primary) return primary
+
+  // Secondary: token was recently rotated — look up by previousTokenHash
+  const rotated = await prisma.session.findFirst({
+    where: { previousTokenHash: hash },
+    include: SESSION_INCLUDE,
+  })
+
+  if (!rotated || !rotated.rotatedAt) return null
+
+  const ageMs = now.getTime() - rotated.rotatedAt.getTime()
+
+  if (ageMs <= ROTATION_GRACE_PERIOD_MS) {
+    // Concurrent request that raced with the rotation — allow through using the new session
+    return rotated
+  }
+
+  // Old token submitted well after rotation — possible session hijack
+  await prisma.session.updateMany({
+    where: { userId: rotated.userId, status: ACTIVE_STATUS },
+    data: { status: REVOKED_STATUS, revokedAt: now },
+  })
+
+  queueSuspiciousActivityAlert({
+    userId: rotated.userId,
+    userEmail: rotated.user.email,
+    reason: 'rotated_token_replay',
+    ipAddress: rotated.ipAddress,
+    deviceName: rotated.deviceName,
+  })
+
+  return null
 }
 
 export async function validateSessionToken(token: string | null): Promise<SessionContext | null> {
   if (!token) return null
 
   const now = new Date()
-  const tokenHash = sessionTokenHash(token)
-  const session = await prisma.session.findUnique({
-    where: { tokenHash },
-    include: {
-      user: {
-        select: {
-          id: true,
-          email: true,
-          name: true,
-        },
-      },
-    },
-  })
+  const hash = sessionTokenHash(token)
 
+  const session = await resolveSession(hash, now)
   if (!session) return null
 
   if (session.expiresAt <= now) {
@@ -368,6 +425,69 @@ export async function validateSessionToken(token: string | null): Promise<Sessio
     },
     user: toSessionUser(session.user),
   }
+}
+
+/**
+ * Rotates the session token: generates a new token, moves the old hash to
+ * `previousTokenHash` for the grace-period replay check, and returns the new raw token.
+ *
+ * Uses an optimistic conditional UPDATE so only one concurrent rotation wins.
+ * If the old token was already rotated within the grace window (concurrent refresh call),
+ * returns null — the caller should treat this as "rotation already happened, reuse cookie".
+ */
+export async function rotateSessionToken(
+  oldToken: string,
+): Promise<{ newRawToken: string } | null> {
+  const now = new Date()
+  const oldHash = sessionTokenHash(oldToken)
+
+  // First verify the session is valid via the current tokenHash
+  const session = await prisma.session.findUnique({
+    where: { tokenHash: oldHash },
+    select: { id: true, status: true, expiresAt: true, revokedAt: true },
+  })
+
+  if (!session) {
+    // Maybe it was already rotated within the grace period
+    const recentlyRotated = await prisma.session.findFirst({
+      where: {
+        previousTokenHash: oldHash,
+        status: ACTIVE_STATUS,
+        expiresAt: { gt: now },
+        rotatedAt: { gt: new Date(now.getTime() - ROTATION_GRACE_PERIOD_MS) },
+      },
+    })
+    if (recentlyRotated) {
+      // Already rotated by a concurrent request — signal the caller to no-op
+      return null
+    }
+    return null
+  }
+
+  if (session.expiresAt <= now || session.status !== ACTIVE_STATUS || session.revokedAt) {
+    return null
+  }
+
+  const newRawToken = createRawSessionToken()
+  const newHash = sessionTokenHash(newRawToken)
+
+  // Atomic rotation: only succeeds if the current tokenHash still matches
+  // (prevents double-rotation race conditions)
+  try {
+    await prisma.session.update({
+      where: { tokenHash: oldHash },
+      data: {
+        tokenHash: newHash,
+        previousTokenHash: oldHash,
+        rotatedAt: now,
+      },
+    })
+  } catch {
+    // P2025 (record not found) means another concurrent request already rotated it
+    return null
+  }
+
+  return { newRawToken }
 }
 
 export async function revokeSessionById(sessionId: string, userId: string) {

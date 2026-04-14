@@ -41,6 +41,8 @@ model User {
   sessions             Session[]
   passwordResetTokens  PasswordResetToken[]
   failedEmailSyncs     FailedEmailSync[]
+  stepUpChallenges     StepUpChallenge[]
+  stepUpTokens         StepUpToken[]
 }
 
 model Account {
@@ -78,6 +80,11 @@ model Session {
   expiresAt    DateTime
   revokedAt    DateTime?
   status       String   @default("active")
+
+  // Token rotation fields
+  previousTokenHash String?   // SHA-256 of the prior token, kept for replay detection
+  rotatedAt         DateTime? // When the last token rotation happened
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -85,6 +92,7 @@ model Session {
 
   @@index([userId, status, lastActiveAt(sort: Desc)])
   @@index([userId, expiresAt])
+  @@index([previousTokenHash])
 }
 
 model Email {
@@ -185,6 +193,36 @@ model PasswordResetToken {
   createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Stores a time-limited email OTP sent for step-up auth (email method only)
+model StepUpChallenge {
+  id        String    @id @default(cuid())
+  userId    String
+  otpHash   String    @unique  // SHA-256 of the 6-digit OTP sent via email
+  action    String             // 'change_password' | 'disable_totp' | 'delete_account'
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, action])
+}
+
+// Short-lived single-use authorization token issued after step-up verification succeeds
+model StepUpToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique  // SHA-256 of the raw token returned to client
+  action    String             // must match the action on the guarded endpoint
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, action])
 }
 
 model SenderMemory {

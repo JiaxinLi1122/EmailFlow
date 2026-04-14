@@ -25,6 +25,71 @@ export async function sendPasswordResetEmail(to: string, resetLink: string) {
   })
 }
 
+export async function sendSuspiciousActivityEmail(input: {
+  to: string
+  reason: 'rotated_token_replay'
+  ipAddress: string
+  deviceName: string
+}) {
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    to: input.to,
+    subject: 'Security alert: suspicious activity on your EmailFlow account',
+    text: [
+      'We detected suspicious activity on your account.',
+      '',
+      'An old session token was replayed after it had already been rotated. This may indicate that someone else has access to your session.',
+      '',
+      `Device: ${input.deviceName}`,
+      `IP Address: ${input.ipAddress || 'Unavailable'}`,
+      '',
+      'For your protection, ALL active sessions have been signed out.',
+      'Please sign in again and change your password if you did not initiate this.',
+    ].join('\n'),
+    html: `
+      <p><strong>We detected suspicious activity on your account.</strong></p>
+      <p>An old session token was replayed after it had already been rotated. This may indicate that someone else has access to your session.</p>
+      <p><strong>Device:</strong> ${input.deviceName}</p>
+      <p><strong>IP Address:</strong> ${input.ipAddress || 'Unavailable'}</p>
+      <p>For your protection, <strong>all active sessions have been signed out</strong>.</p>
+      <p>Please sign in again. If this wasn't you, change your password immediately.</p>
+    `,
+  })
+}
+
+export async function sendStepUpOtpEmail(input: {
+  to: string
+  otp: string
+  action: string
+}) {
+  const actionLabel: Record<string, string> = {
+    change_password: 'change your password',
+    disable_totp: 'disable two-factor authentication',
+    delete_account: 'delete your account',
+  }
+  const label = actionLabel[input.action] ?? 'perform a sensitive account action'
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    to: input.to,
+    subject: 'Your EmailFlow verification code',
+    text: [
+      `Your verification code to ${label} is:`,
+      '',
+      `  ${input.otp}`,
+      '',
+      'This code expires in 10 minutes. Do not share it with anyone.',
+      "If you didn't request this, you can ignore this email.",
+    ].join('\n'),
+    html: `
+      <p>Your verification code to <strong>${label}</strong> is:</p>
+      <p style="font-size:2rem;letter-spacing:0.25em;font-weight:bold">${input.otp}</p>
+      <p>This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p>
+      <p>If you didn't request this, you can safely ignore this email.</p>
+    `,
+  })
+}
+
 export async function sendNewDeviceLoginEmail(input: {
   to: string
   loginTime: Date

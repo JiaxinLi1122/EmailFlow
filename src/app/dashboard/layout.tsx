@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/use-auth'
+import { useSessionRotation } from '@/lib/use-session-rotation'
 import { Sidebar } from '@/components/sidebar'
 import { Header } from '@/components/header'
 import { SectionFade } from '@/components/page-transition'
@@ -11,6 +12,7 @@ import { StatePanel } from '@/components/state-panel'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { isAuthenticated, isLoading } = useAuth()
+  useSessionRotation(isAuthenticated)
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {

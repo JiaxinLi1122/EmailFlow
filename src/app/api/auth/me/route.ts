@@ -21,6 +21,7 @@ export async function GET() {
         gmailEmail: true,
         syncStartDate: true,
         timezone: true,
+        totpEnabled: true,
       },
     })
 
@@ -40,6 +41,7 @@ export async function GET() {
         gmailEmail: user.gmailEmail,
         syncStartDate: user.syncStartDate,
         timezone: user.timezone,
+        totpEnabled: user.totpEnabled,
         currentSessionId: context.session.id,
       },
     })
