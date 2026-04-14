@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -69,7 +69,7 @@ export default function DashboardPage() {
   const [showSyncModal, setShowSyncModal] = useState(() => searchParams.get('gmail_connected') === '1')
   const [syncSetupLoading, setSyncSetupLoading] = useState<number | null>(null)
 
-  async function handleSyncSetup(days: number) {
+  const handleSyncSetup = useCallback(async (days: number) => {
     setSyncSetupLoading(days)
     try {
       await fetch('/api/settings/sync-range', {
@@ -82,75 +82,108 @@ export default function DashboardPage() {
       setShowSyncModal(false)
       router.replace('/dashboard', { scroll: false })
     }
-  }
+  }, [router])
 
-  function handleSyncSkip() {
+  const handleSyncSkip = useCallback(() => {
     setShowSyncModal(false)
     router.replace('/dashboard', { scroll: false })
-  }
+  }, [router])
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: () => fetch('/api/stats').then((r) => r.json()),
     staleTime: CACHE_TIME.stats,
+    placeholderData: (prev) => prev,
   })
 
   const { data: allTasksRes, isLoading: tasksLoading } = useQuery({
     queryKey: ['tasks', 'dashboard'],
     queryFn: () => fetch('/api/tasks?limit=50&sort=priority').then((r) => r.json()),
     staleTime: CACHE_TIME.list,
+    placeholderData: (prev) => prev,
   })
 
   const { data: emailsRes, isLoading: emailsLoading } = useQuery({
     queryKey: ['emails', 'for-dashboard'],
     queryFn: () => fetch('/api/emails?limit=50').then((r) => r.json()),
     staleTime: CACHE_TIME.list,
+    placeholderData: (prev) => prev,
   })
 
   const { data: mattersRes, isLoading: mattersLoading } = useQuery({
     queryKey: ['matters', 'for-dashboard'],
     queryFn: () => fetch('/api/matters').then((r) => r.json()),
     staleTime: CACHE_TIME.stats,
+    placeholderData: (prev) => prev,
   })
 
   const s = stats?.data
-  const allTasks: DashboardTask[] = allTasksRes?.data || []
-  const confirmedTasks = allTasks.filter((t) => t.status === 'confirmed').slice(0, 5)
-  const pendingTasks = allTasks.filter((t) => t.status === 'pending').slice(0, 5)
-  const allEmails: DashboardEmail[] = emailsRes?.data || []
-  const matters = useMemo(() => ((mattersRes?.data || []) as DashboardMatter[]), [mattersRes?.data])
 
-  const totalTasks = s?.tasks?.total || 0
-  const completedTasks = s?.tasks?.completed || 0
-  const pendingTaskCount = s?.tasks?.pending || 0
-  const confirmedTaskCount = allTasks.filter((t) => t.status === 'confirmed').length
-  const dismissedTaskCount = allTasks.filter((t) => t.status === 'dismissed').length
+  // Memoize task-derived data so it only recomputes when allTasksRes changes,
+  // not on every re-render triggered by unrelated queries (stats, emails, matters).
+  const allTasks = useMemo<DashboardTask[]>(
+    () => allTasksRes?.data ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allTasksRes?.data]
+  )
+
+  const { confirmedTasks, pendingTasks, confirmedTaskCount, dismissedTaskCount, priorityCounts, upcomingCount } =
+    useMemo(() => {
+      const confirmed = allTasks.filter((t) => t.status === 'confirmed')
+      const pending = allTasks.filter((t) => t.status === 'pending')
+      const counts = { critical: 0, high: 0, medium: 0, low: 0 }
+      for (const task of allTasks) {
+        const band = getPriorityBand(task.priorityScore || 0)
+        counts[band as keyof typeof counts]++
+      }
+      const now = Date.now()
+      const weekFromNow = now + 7 * 86400000
+      const upcoming = allTasks.filter((task) => {
+        const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
+        if (!deadline) return false
+        const t = new Date(deadline).getTime()
+        return t >= now && t <= weekFromNow && (task.status === 'pending' || task.status === 'confirmed')
+      }).length
+      return {
+        confirmedTasks: confirmed.slice(0, 5),
+        pendingTasks: pending.slice(0, 5),
+        confirmedTaskCount: confirmed.length,
+        dismissedTaskCount: allTasks.filter((t) => t.status === 'dismissed').length,
+        priorityCounts: counts,
+        upcomingCount: upcoming,
+      }
+    }, [allTasks])
+
+  // Memoize email-derived data so it only recomputes when emailsRes changes.
+  const allEmails = useMemo<DashboardEmail[]>(
+    () => emailsRes?.data ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [emailsRes?.data]
+  )
+
+  const attentionEmails = useMemo(
+    () =>
+      allEmails
+        .filter(
+          (email) =>
+            (email.classification === 'action' || email.classification === 'uncertain') &&
+            !((email.taskLinks?.length ?? 0) > 0)
+        )
+        .slice(0, 5),
+    [allEmails]
+  )
+
+  const matters = useMemo(
+    () => (mattersRes?.data ?? []) as DashboardMatter[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mattersRes?.data]
+  )
+
+  const totalTasks = s?.tasks?.total ?? 0
+  const completedTasks = s?.tasks?.completed ?? 0
+  const pendingTaskCount = s?.tasks?.pending ?? 0
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
-  const emailData = s?.emails || { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 }
-
-  const attentionEmails = allEmails
-    .filter((email) =>
-      (email.classification === 'action' || email.classification === 'uncertain') && !((email.taskLinks?.length ?? 0) > 0)
-    )
-    .slice(0, 5)
-
-  const priorityCounts = { critical: 0, high: 0, medium: 0, low: 0 }
-  for (const task of allTasks) {
-    const band = getPriorityBand(task.priorityScore || 0)
-    priorityCounts[band as keyof typeof priorityCounts]++
-  }
-
-  const now = new Date()
-  const weekFromNow = new Date(now.getTime() + 7 * 86400000)
-  const upcomingCount = allTasks.filter((task) => {
-    const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
-    if (!deadline) return false
-    const date = new Date(deadline)
-    return date >= now && date <= weekFromNow && (task.status === 'pending' || task.status === 'confirmed')
-  }).length
-
-  const actionToTask = emailData.action > 0
-    ? Math.round((totalTasks / emailData.action) * 100)
-    : 0
+  const emailData = s?.emails ?? { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 }
+  const actionToTask = emailData.action > 0 ? Math.round((totalTasks / emailData.action) * 100) : 0
 
   const activeIdentities = useMemo(() => {
     const counts = new Map<string, { name: string; count: number }>()
@@ -176,7 +209,10 @@ export default function DashboardPage() {
         lastActivity: 0,
       }
       existing.count += 1
-      existing.lastActivity = Math.max(existing.lastActivity, matter.lastMessageAt ? new Date(matter.lastMessageAt).getTime() : 0)
+      existing.lastActivity = Math.max(
+        existing.lastActivity,
+        matter.lastMessageAt ? new Date(matter.lastMessageAt).getTime() : 0
+      )
       counts.set(project.id, existing)
     }
     return Array.from(counts.values()).sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 5)
@@ -188,7 +224,9 @@ export default function DashboardPage() {
         title={`Hi, ${user?.name?.split(' ')[0] || 'there'}`}
         description="Your email-to-task command center."
         actions={
-          s?.sync?.gmailConnected ? (
+          statsLoading ? (
+            <Skeleton className="h-9 w-28 rounded-lg" />
+          ) : s?.sync?.gmailConnected ? (
             <Badge className="h-9 rounded-lg bg-green-100 px-4 text-sm font-medium text-green-700 hover:bg-green-100">
               Connected
             </Badge>
@@ -341,177 +379,184 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {mattersLoading ? (
+      {(mattersLoading || activeIdentities.length > 0 || activeProjects.length > 0) && (
         <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <IdentityCardSkeleton />
-          <IdentityCardSkeleton />
-        </div>
-      ) : (activeIdentities.length > 0 || activeProjects.length > 0) && (
-        <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="border-sky-200/80 bg-[linear-gradient(180deg,rgba(240,249,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-100">
-                  <UserRound className="h-3.5 w-3.5 text-sky-700" />
-                </span>
-                Active Identities
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activeIdentities.length === 0 ? (
-                <p className="text-sm text-gray-400">No identity groupings yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {activeIdentities.map((identity) => (
-                    <div
-                      key={identity.name}
-                      className="flex items-center justify-between rounded-xl border border-sky-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-sky-50/70"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{identity.name}</p>
-                        <p className="text-xs text-slate-500">Role context inferred from recent matter activity</p>
-                      </div>
-                      <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-100">
-                        {identity.count} matters
-                      </span>
+          {mattersLoading ? (
+            <>
+              <IdentityCardSkeleton />
+              <IdentityCardSkeleton />
+            </>
+          ) : (
+            <>
+              <Card className="border-sky-200/80 bg-[linear-gradient(180deg,rgba(240,249,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-100">
+                      <UserRound className="h-3.5 w-3.5 text-sky-700" />
+                    </span>
+                    Active Identities
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {activeIdentities.length === 0 ? (
+                    <p className="text-sm text-gray-400">No identity groupings yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeIdentities.map((identity) => (
+                        <div
+                          key={identity.name}
+                          className="flex items-center justify-between rounded-xl border border-sky-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-sky-50/70"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">{identity.name}</p>
+                            <p className="text-xs text-slate-500">Role context inferred from recent matter activity</p>
+                          </div>
+                          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-100">
+                            {identity.count} matters
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  )}
+                </CardContent>
+              </Card>
 
-          <Card className="border-violet-200/80 bg-[linear-gradient(180deg,rgba(245,243,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-100">
-                  <FolderOpen className="h-3.5 w-3.5 text-violet-700" />
-                </span>
-                Active Projects
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activeProjects.length === 0 ? (
-                <p className="text-sm text-gray-400">No project groupings yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {activeProjects.map((project) => (
-                    <Link
-                      key={project.id}
-                      href="/dashboard/tasks"
-                      className="flex items-center justify-between rounded-xl border border-violet-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-violet-50/70 hover:text-violet-700"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{project.name}</p>
-                        <p className="text-xs text-slate-500">Recently active grouped project context</p>
-                      </div>
-                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-100">
-                        {project.count} matters
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              <Card className="border-violet-200/80 bg-[linear-gradient(180deg,rgba(245,243,255,0.9)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-100">
+                      <FolderOpen className="h-3.5 w-3.5 text-violet-700" />
+                    </span>
+                    Active Projects
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {activeProjects.length === 0 ? (
+                    <p className="text-sm text-gray-400">No project groupings yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeProjects.map((project) => (
+                        <Link
+                          key={project.id}
+                          href="/dashboard/tasks"
+                          className="flex items-center justify-between rounded-xl border border-violet-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-violet-50/70 hover:text-violet-700"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">{project.name}</p>
+                            <p className="text-xs text-slate-500">Recently active grouped project context</p>
+                          </div>
+                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-100">
+                            {project.count} matters
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
-      {(tasksLoading || emailsLoading) ? (
+      {(tasksLoading || emailsLoading || pendingTasks.length > 0 || attentionEmails.length > 0) && (
         <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <ListCardSkeleton />
-          <ListCardSkeleton />
-        </div>
-      ) : (pendingTasks.length > 0 || attentionEmails.length > 0) && (
-        <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="border-purple-200/80 bg-[linear-gradient(180deg,rgba(250,245,255,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100">
-                    <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
+          {tasksLoading ? (
+            <ListCardSkeleton />
+          ) : (
+            <Card className="border-purple-200/80 bg-[linear-gradient(180deg,rgba(250,245,255,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100">
+                      <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
+                    </div>
+                    Tasks to Review
+                    {pendingTasks.length > 0 && (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">{pendingTasks.length}</span>
+                    )}
+                  </CardTitle>
+                  <Link href="/dashboard/tasks" className="text-xs text-purple-600 hover:underline">View all</Link>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {pendingTasks.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-gray-400">All tasks reviewed</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {pendingTasks.map((task: DashboardTask) => {
+                      const band = getPriorityBand(task.priorityScore || 0)
+                      return (
+                        <Link
+                          key={task.id}
+                          href={`/dashboard/tasks/${task.id}`}
+                          className="flex items-center gap-3 rounded-lg border border-purple-100 bg-white/80 px-3 py-2.5 transition-colors hover:bg-purple-50"
+                        >
+                          <div className={`h-7 w-1 shrink-0 rounded-full ${
+                            band === 'critical' ? 'bg-red-500' : band === 'high' ? 'bg-orange-400' : band === 'medium' ? 'bg-yellow-400' : 'bg-gray-300'
+                          }`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-900">{task.title}</p>
+                            <p className="truncate text-xs text-gray-500">{task.summary}</p>
+                          </div>
+                          <Badge variant="outline" className={`shrink-0 text-[10px] ${getPriorityColor(band)}`}>
+                            {getPriorityLabel(band)}
+                          </Badge>
+                        </Link>
+                      )
+                    })}
                   </div>
-                  Tasks to Review
-                  {pendingTasks.length > 0 && (
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">{pendingTasks.length}</span>
-                  )}
-                </CardTitle>
-                <Link href="/dashboard/tasks" className="text-xs text-purple-600 hover:underline">View all</Link>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {pendingTasks.length === 0 ? (
-                <p className="py-4 text-center text-xs text-gray-400">All tasks reviewed</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {pendingTasks.map((task: DashboardTask) => {
-                    const band = getPriorityBand(task.priorityScore || 0)
-                    return (
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {emailsLoading ? (
+            <ListCardSkeleton />
+          ) : (
+            <Card className="border-red-200/80 bg-[linear-gradient(180deg,rgba(254,242,242,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-red-100">
+                      <Mail className="h-3.5 w-3.5 text-red-600" />
+                    </div>
+                    Emails Need Attention
+                    {attentionEmails.length > 0 && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">{attentionEmails.length}</span>
+                    )}
+                  </CardTitle>
+                  <Link href="/dashboard/emails" className="text-xs text-red-600 hover:underline">View all</Link>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {attentionEmails.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-gray-400">All caught up</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {attentionEmails.map((email: DashboardEmail) => (
                       <Link
-                        key={task.id}
-                        href={`/dashboard/tasks/${task.id}`}
-                        className="flex items-center gap-3 rounded-lg border border-purple-100 bg-white/80 px-3 py-2.5 transition-colors hover:bg-purple-50"
+                        key={email.id}
+                        href={`/dashboard/emails/${email.id}`}
+                        className="flex items-center gap-3 rounded-lg border border-red-100 bg-white/80 px-3 py-2.5 transition-colors hover:bg-red-50"
                       >
                         <div className={`h-7 w-1 shrink-0 rounded-full ${
-                          band === 'critical' ? 'bg-red-500' : band === 'high' ? 'bg-orange-400' : band === 'medium' ? 'bg-yellow-400' : 'bg-gray-300'
+                          email.classification === 'action' ? 'bg-red-500' : 'bg-yellow-400'
                         }`} />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-gray-900">{task.title}</p>
-                          <p className="truncate text-xs text-gray-500">{task.summary}</p>
+                          <p className="truncate text-sm font-medium text-gray-900">{email.subject}</p>
+                          <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
                         </div>
-                        <Badge variant="outline" className={`shrink-0 text-[10px] ${getPriorityColor(band)}`}>
-                          {getPriorityLabel(band)}
+                        <Badge variant="outline" className={`shrink-0 text-[10px] ${getEmailClassConfig(email.classification).color}`}>
+                          {getEmailClassConfig(email.classification).label.split(' ')[0]}
                         </Badge>
                       </Link>
-                    )
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-red-200/80 bg-[linear-gradient(180deg,rgba(254,242,242,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-red-100">
-                    <Mail className="h-3.5 w-3.5 text-red-600" />
+                    ))}
                   </div>
-                  Emails Need Attention
-                  {attentionEmails.length > 0 && (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">{attentionEmails.length}</span>
-                  )}
-                </CardTitle>
-                <Link href="/dashboard/emails" className="text-xs text-red-600 hover:underline">View all</Link>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {attentionEmails.length === 0 ? (
-                <p className="py-4 text-center text-xs text-gray-400">All caught up</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {attentionEmails.map((email: DashboardEmail) => (
-                    <Link
-                      key={email.id}
-                      href={`/dashboard/emails/${email.id}`}
-                      className="flex items-center gap-3 rounded-lg border border-red-100 bg-white/80 px-3 py-2.5 transition-colors hover:bg-red-50"
-                    >
-                      <div className={`h-7 w-1 shrink-0 rounded-full ${
-                        email.classification === 'action' ? 'bg-red-500' : 'bg-yellow-400'
-                      }`} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-gray-900">{email.subject}</p>
-                        <p className="truncate text-xs text-gray-500">{email.sender?.split('<')[0]?.trim()}</p>
-                      </div>
-                      <Badge variant="outline" className={`shrink-0 text-[10px] ${getEmailClassConfig(email.classification).color}`}>
-                        {getEmailClassConfig(email.classification).label.split(' ')[0]}
-                      </Badge>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
