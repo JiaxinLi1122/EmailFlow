@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword } from '@/lib/auth-password'
-import { createToken, setSessionCookie } from '@/lib/auth-token'
+import { setSessionCookie } from '@/lib/auth-token'
+import { createUserSession } from '@/lib/auth-sessions'
 
 export async function POST(req: Request) {
   try {
@@ -38,8 +39,11 @@ export async function POST(req: Request) {
       },
     })
 
-    const token = createToken({ userId: user.id, email: user.email })
-    await setSessionCookie(token)
+    const { rawToken } = await createUserSession({
+      userId: user.id,
+      request: req,
+    })
+    await setSessionCookie(rawToken)
 
     return NextResponse.json({
       success: true,

@@ -55,10 +55,24 @@ model Account {
 
 model Session {
   id           String   @id @default(cuid())
-  sessionToken String   @unique
   userId       String
-  expires      DateTime
+  tokenHash    String   @unique
+  deviceName   String   @default("Unknown device")
+  deviceType   String   @default("unknown")
+  browser      String   @default("Unknown")
+  os           String   @default("Unknown")
+  ipAddress    String   @default("")
+  userAgent    String   @default("")
+  lastActiveAt DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, lastActiveAt(sort: Desc)])
+  @@index([userId, expiresAt])
 }
 
 model Email {

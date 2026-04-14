@@ -1,29 +1,19 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getSessionToken, verifyToken } from '@/lib/auth-token'
+import { getCurrentSessionContext } from '@/lib/auth-session'
 
 export async function GET() {
   try {
-    const token = await getSessionToken()
-
-    if (!token) {
+    const context = await getCurrentSessionContext()
+    if (!context) {
       return NextResponse.json(
         { success: false, error: 'Not logged in' },
         { status: 401 }
       )
     }
 
-    const payload = verifyToken(token)
-
-    if (!payload) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid session' },
-        { status: 401 }
-      )
-    }
-
     const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
+      where: { id: context.user.id },
       select: {
         id: true,
         email: true,
@@ -50,6 +40,7 @@ export async function GET() {
         gmailEmail: user.gmailEmail,
         syncStartDate: user.syncStartDate,
         timezone: user.timezone,
+        currentSessionId: context.session.id,
       },
     })
   } catch (err) {

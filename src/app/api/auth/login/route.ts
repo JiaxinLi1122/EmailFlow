@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyPassword } from '@/lib/auth-password'
 import { createToken, setSessionCookie } from '@/lib/auth-token'
+import { createUserSession } from '@/lib/auth-sessions'
 
 export async function POST(req: Request) {
   try {
@@ -35,8 +36,8 @@ export async function POST(req: Request) {
     if (user.totpEnabled) {
       const tempToken = createToken({
         userId: user.id,
-        email: user.email,
         purpose: 'pre-2fa',
+        remember: !!rememberMe,
       })
 
       return NextResponse.json({
@@ -46,12 +47,13 @@ export async function POST(req: Request) {
       })
     }
 
-    const token = createToken(
-      { userId: user.id, email: user.email },
-      !!rememberMe,
-    )
+    const { rawToken } = await createUserSession({
+      userId: user.id,
+      remember: !!rememberMe,
+      request: req,
+    })
 
-    await setSessionCookie(token, !!rememberMe)
+    await setSessionCookie(rawToken, !!rememberMe)
 
     return NextResponse.json({
       success: true,

@@ -2,19 +2,19 @@ import jwt from 'jsonwebtoken'
 import { cookies } from 'next/headers'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production'
-const COOKIE_NAME = 'ef-session'
-const MAX_AGE_REMEMBER = 30 * 24 * 60 * 60 // 30 days in seconds
-const MAX_AGE_SESSION = 24 * 60 * 60        //  1 day  in seconds
+export const COOKIE_NAME = 'ef-session'
+export const SESSION_MAX_AGE_REMEMBER_SECONDS = 30 * 24 * 60 * 60
+export const SESSION_MAX_AGE_DEFAULT_SECONDS = 24 * 60 * 60
 
 export interface TokenPayload {
   userId: string
-  email: string
   purpose?: 'pre-2fa'
+  remember?: boolean
 }
 
-export function createToken(payload: TokenPayload, remember = false): string {
+export function createToken(payload: TokenPayload, expiresInSeconds = 10 * 60): string {
   return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: remember ? MAX_AGE_REMEMBER : MAX_AGE_SESSION,
+    expiresIn: expiresInSeconds,
   })
 }
 
@@ -32,7 +32,7 @@ export async function setSessionCookie(token: string, remember = false) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    ...(remember ? { maxAge: MAX_AGE_REMEMBER } : {}),
+    ...(remember ? { maxAge: SESSION_MAX_AGE_REMEMBER_SECONDS } : {}),
     path: '/',
   })
 }

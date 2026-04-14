@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
@@ -25,9 +26,33 @@ async function main() {
   })
 
   await prisma.session.upsert({
-    where: { sessionToken: 'demo-session-token' },
-    update: { userId: user.id, expires: daysFromNow(30) },
-    create: { sessionToken: 'demo-session-token', userId: user.id, expires: daysFromNow(30) },
+    where: { tokenHash: hashToken('demo-session-token') },
+    update: {
+      userId: user.id,
+      deviceName: 'Desktop · Seeded browser',
+      deviceType: 'desktop',
+      browser: 'Seeded browser',
+      os: 'Seeded OS',
+      ipAddress: '127.0.0.1',
+      userAgent: 'seed-script',
+      lastActiveAt: new Date(),
+      expiresAt: daysFromNow(30),
+      revokedAt: null,
+      status: 'active',
+    },
+    create: {
+      tokenHash: hashToken('demo-session-token'),
+      userId: user.id,
+      deviceName: 'Desktop · Seeded browser',
+      deviceType: 'desktop',
+      browser: 'Seeded browser',
+      os: 'Seeded OS',
+      ipAddress: '127.0.0.1',
+      userAgent: 'seed-script',
+      lastActiveAt: new Date(),
+      expiresAt: daysFromNow(30),
+      status: 'active',
+    },
   })
 
   // ── Identities ────────────────────────────────────────────────────────────
@@ -874,6 +899,7 @@ function buildDigestContent() {
 function daysAgo(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d }
 function hoursAgo(n: number) { return new Date(Date.now() - n * 3600_000) }
 function daysFromNow(n: number) { const d = new Date(); d.setDate(d.getDate() + n); return d }
+function hashToken(token: string) { return crypto.createHash('sha256').update(token).digest('hex') }
 function nextWeekday(target: number) { const d = new Date(); let diff = (target - d.getDay() + 7) % 7; if (!diff) diff = 7; d.setDate(d.getDate() + diff); return d }
 function todayAt(h: number, m: number) { const d = new Date(); d.setHours(h, m, 0, 0); return d }
 function startOfDay(d: Date) { const r = new Date(d); r.setHours(0, 0, 0, 0); return r }
