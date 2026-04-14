@@ -9,13 +9,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { RefreshCw, User, LogOut, ChevronRight } from 'lucide-react'
+import { RefreshCw, User, LogOut, ChevronRight, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
-import { toast } from 'sonner'
 import { BatchClassificationReviewDialog } from '@/components/batch-classification-review-dialog'
 import type { BatchClassificationReviewPayload } from '@/services/email-sync-service'
 import { isWorkspaceQueryKey } from '@/lib/query-cache'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+
+interface SyncResultData {
+  ok: boolean
+  syncedCount: number
+  skippedCount: number
+  failedCount: number
+  retriedSuccessCount: number
+  retriedFailedCount: number
+  pendingFailedCount: number
+  errorMessage?: string
+}
 
 export function Header() {
   const { user, logout } = useAuth()
@@ -24,6 +42,8 @@ export function Header() {
   const router = useRouter()
   const [reviewPayload, setReviewPayload] = useState<BatchClassificationReviewPayload | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [syncResult, setSyncResult] = useState<SyncResultData | null>(null)
+  const [syncResultOpen, setSyncResultOpen] = useState(false)
 
   const segments = pathname.split('/').filter(Boolean)
   const currentSection = segments[1] ? segments[1].replace(/-/g, ' ') : 'dashboard'
@@ -50,6 +70,7 @@ export function Header() {
         type: 'active',
       })
       router.refresh()
+
       const syncData = data?.data as {
         syncedCount: number
         skippedCount: number
@@ -59,44 +80,27 @@ export function Header() {
         pendingFailedCount: number
         review?: BatchClassificationReviewPayload | null
       } | undefined
-      const review = (syncData?.review ?? null) as BatchClassificationReviewPayload | null
 
+      const review = (syncData?.review ?? null) as BatchClassificationReviewPayload | null
       if (review && review.items.length > 0) {
         setReviewPayload(review)
         setReviewOpen(true)
       }
 
-      const synced = syncData?.syncedCount ?? 0
-      const skipped = syncData?.skippedCount ?? 0
-      const failed = syncData?.failedCount ?? 0
-      const retriedSuccess = syncData?.retriedSuccessCount ?? 0
-      const retriedFailed = syncData?.retriedFailedCount ?? 0
-      const pendingFailed = syncData?.pendingFailedCount ?? 0
-
-      // Build the primary line
-      const primaryParts = [`Synced ${synced} emails`]
-      if (skipped > 0) primaryParts.push(`${skipped} skipped`)
-      if (failed > 0) primaryParts.push(`${failed} failed`)
-      const primaryMessage = primaryParts.join(', ')
-
-      // Build optional retry context lines
-      const retryLines: string[] = []
-      if (retriedSuccess > 0) retryLines.push(`Recovered ${retriedSuccess} previously failed email${retriedSuccess === 1 ? '' : 's'}`)
-      if (pendingFailed > 0) retryLines.push(`${pendingFailed} failed email${pendingFailed === 1 ? '' : 's'} still pending retry`)
-      if (retriedFailed > 0 && pendingFailed === 0) retryLines.push(`${retriedFailed} email${retriedFailed === 1 ? '' : 's'} could not be recovered`)
-
-      const fullMessage = [primaryMessage, ...retryLines].join(' · ')
-
-      if (review && review.items.length > 0) {
-        toast.success(`${fullMessage} · review new project guesses`)
-      } else {
-        toast.success(fullMessage)
-      }
+      setSyncResult({
+        ok: true,
+        syncedCount: syncData?.syncedCount ?? 0,
+        skippedCount: syncData?.skippedCount ?? 0,
+        failedCount: syncData?.failedCount ?? 0,
+        retriedSuccessCount: syncData?.retriedSuccessCount ?? 0,
+        retriedFailedCount: syncData?.retriedFailedCount ?? 0,
+        pendingFailedCount: syncData?.pendingFailedCount ?? 0,
+      })
+      setSyncResultOpen(true)
     },
 
     onError: (err) => {
       console.error('Sync failed:', err)
-      toast.error('Sync failed')
       // Refetch stats even on failure — lastSyncAt may have been written before
       // the error occurred, so the UI should reflect the current DB state.
       queryClient.invalidateQueries({
@@ -106,6 +110,17 @@ export function Header() {
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
         type: 'active',
       })
+      setSyncResult({
+        ok: false,
+        syncedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        retriedSuccessCount: 0,
+        retriedFailedCount: 0,
+        pendingFailedCount: 0,
+        errorMessage: err instanceof Error ? err.message : 'Sync failed',
+      })
+      setSyncResultOpen(true)
     },
   })
 
@@ -162,6 +177,100 @@ export function Header() {
           setReviewPayload(null)
         }}
       />
+
+      <SyncResultDialog
+        open={syncResultOpen}
+        onClose={() => setSyncResultOpen(false)}
+        result={syncResult}
+      />
     </>
+  )
+}
+
+// ============================================================
+// Sync Result Dialog
+// Displayed after every sync attempt. Does not auto-close.
+// ============================================================
+
+interface SyncResultDialogProps {
+  open: boolean
+  onClose: () => void
+  result: SyncResultData | null
+}
+
+function SyncResultDialog({ open, onClose, result }: SyncResultDialogProps) {
+  if (!result) return null
+
+  const { ok, syncedCount, skippedCount, failedCount, retriedSuccessCount, retriedFailedCount, pendingFailedCount, errorMessage } = result
+
+  const isPartial = ok && (failedCount > 0 || pendingFailedCount > 0)
+  const isPerfect = ok && failedCount === 0 && pendingFailedCount === 0
+
+  const statusIcon = !ok
+    ? <AlertCircle className="h-5 w-5 text-red-500" />
+    : isPartial
+    ? <AlertTriangle className="h-5 w-5 text-amber-500" />
+    : <CheckCircle2 className="h-5 w-5 text-green-500" />
+
+  const statusLabel = !ok ? 'Sync failed' : isPartial ? 'Partial success' : 'Success'
+  const statusColor = !ok ? 'text-red-600' : isPartial ? 'text-amber-600' : 'text-green-600'
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Sync Result</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2 rounded-lg border px-3 py-2.5">
+          {statusIcon}
+          <span className={cn('text-sm font-medium', statusColor)}>{statusLabel}</span>
+        </div>
+
+        {ok ? (
+          <ul className="space-y-1.5 text-sm text-gray-700">
+            <SyncLine label={`Synced ${syncedCount} email${syncedCount === 1 ? '' : 's'}`} />
+            {skippedCount > 0 && (
+              <SyncLine label={`${skippedCount} skipped (already stored)`} muted />
+            )}
+            {failedCount > 0 && (
+              <SyncLine label={`${failedCount} failed to store`} warn />
+            )}
+            {retriedSuccessCount > 0 && (
+              <SyncLine label={`Recovered ${retriedSuccessCount} previously failed email${retriedSuccessCount === 1 ? '' : 's'}`} success />
+            )}
+            {pendingFailedCount > 0 && (
+              <SyncLine label={`${pendingFailedCount} failed email${pendingFailedCount === 1 ? '' : 's'} still pending retry`} warn />
+            )}
+            {retriedFailedCount > 0 && pendingFailedCount === 0 && (
+              <SyncLine label={`${retriedFailedCount} email${retriedFailedCount === 1 ? '' : 's'} could not be recovered`} warn />
+            )}
+            {isPerfect && syncedCount === 0 && skippedCount === 0 && (
+              <SyncLine label="No new emails" muted />
+            )}
+          </ul>
+        ) : (
+          <p className="text-sm text-gray-600">{errorMessage}</p>
+        )}
+
+        <DialogFooter showCloseButton={false}>
+          <Button onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SyncLine({ label, muted, warn, success }: { label: string; muted?: boolean; warn?: boolean; success?: boolean }) {
+  return (
+    <li className={cn(
+      'flex items-center gap-2',
+      muted && 'text-gray-400',
+      warn && 'text-amber-600',
+      success && 'text-green-600',
+    )}>
+      <span className="h-1 w-1 rounded-full bg-current opacity-60 shrink-0" />
+      {label}
+    </li>
   )
 }
