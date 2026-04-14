@@ -72,6 +72,8 @@ model Session {
   os           String   @default("Unknown")
   ipAddress    String   @default("")
   userAgent    String   @default("")
+  deviceFingerprint String?
+  isNewDevice  Boolean  @default(false)
   lastActiveAt DateTime @default(now())
   expiresAt    DateTime
   revokedAt    DateTime?

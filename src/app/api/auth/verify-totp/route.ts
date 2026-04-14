@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     }
 
     const remember = Boolean(payload.remember)
-    const { rawToken } = await createUserSession({
+    const { rawToken, isNewDevice } = await createUserSession({
       userId: user.id,
       remember,
       request: req,
@@ -65,6 +65,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      isNewDevice,
       data: {
         id: user.id,
         email: user.email,

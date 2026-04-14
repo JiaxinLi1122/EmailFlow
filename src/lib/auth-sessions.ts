@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 
 import { prisma } from '@/lib/prisma'
+import { sendNewDeviceLoginEmail } from '@/lib/mailer'
 import {
   SESSION_MAX_AGE_DEFAULT_SECONDS,
   SESSION_MAX_AGE_REMEMBER_SECONDS,
@@ -30,6 +31,7 @@ export interface SessionContext {
     os: string
     ipAddress: string
     userAgent: string
+    isNewDevice: boolean
     lastActiveAt: Date
     expiresAt: Date
     revokedAt: Date | null
@@ -107,19 +109,48 @@ function formatDeviceName(deviceType: DeviceType, os: string, browser: string) {
   return 'Unknown device'
 }
 
+function createDeviceFingerprint(input: {
+  deviceName: string
+  deviceType: string
+  browser: string
+  os: string
+  userAgent: string
+}) {
+  const normalized = [
+    input.deviceName,
+    input.deviceType,
+    input.browser,
+    input.os,
+    input.userAgent.toLowerCase(),
+  ]
+    .map((value) => value.trim().toLowerCase())
+    .join('|')
+
+  return crypto.createHash('sha256').update(normalized).digest('hex')
+}
+
 function getDeviceInfo(request: Request) {
   const userAgent = request.headers.get('user-agent') || ''
   const deviceType = detectDeviceType(userAgent)
   const browser = detectBrowser(userAgent)
   const os = detectOs(userAgent)
 
+  const deviceName = formatDeviceName(deviceType, os, browser)
+
   return {
-    deviceName: formatDeviceName(deviceType, os, browser),
+    deviceName,
     deviceType,
     browser,
     os,
     ipAddress: getIpAddress(request),
     userAgent,
+    deviceFingerprint: createDeviceFingerprint({
+      deviceName,
+      deviceType,
+      browser,
+      os,
+      userAgent,
+    }),
   }
 }
 
@@ -150,15 +181,17 @@ export async function createUserSession(input: {
   userId: string
   remember?: boolean
   request: Request
+  sendNewDeviceAlert?: boolean
 }) {
   const remember = Boolean(input.remember)
+  const sendNewDeviceAlert = input.sendNewDeviceAlert !== false
   const now = new Date()
   const expiresAt = new Date(now.getTime() + sessionLifetimeSeconds(remember) * 1000)
   const rawToken = createRawSessionToken()
   const tokenHash = sessionTokenHash(rawToken)
   const device = getDeviceInfo(input.request)
 
-  const session = await prisma.$transaction(async (tx) => {
+  const { session, userEmail } = await prisma.$transaction(async (tx) => {
     const activeSessions = await tx.session.findMany({
       where: {
         userId: input.userId,
@@ -167,7 +200,27 @@ export async function createUserSession(input: {
         expiresAt: { gt: now },
       },
       orderBy: [{ lastActiveAt: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true },
+      select: {
+        id: true,
+        deviceName: true,
+        browser: true,
+        os: true,
+        userAgent: true,
+        deviceType: true,
+        deviceFingerprint: true,
+      },
+    })
+
+    const isKnownDevice = activeSessions.some((existingSession) => {
+      if (existingSession.deviceFingerprint && existingSession.deviceFingerprint === device.deviceFingerprint) {
+        return true
+      }
+
+      return (
+        existingSession.deviceName === device.deviceName &&
+        existingSession.browser === device.browser &&
+        existingSession.os === device.os
+      )
     })
 
     const sessionsToRevoke = Math.max(0, activeSessions.length - MAX_ACTIVE_SESSIONS + 1)
@@ -183,7 +236,7 @@ export async function createUserSession(input: {
       })
     }
 
-    return tx.session.create({
+    const session = await tx.session.create({
       data: {
         userId: input.userId,
         tokenHash,
@@ -193,14 +246,66 @@ export async function createUserSession(input: {
         os: device.os,
         ipAddress: device.ipAddress,
         userAgent: device.userAgent,
+        deviceFingerprint: device.deviceFingerprint,
+        isNewDevice: !isKnownDevice,
         lastActiveAt: now,
         expiresAt,
         status: ACTIVE_STATUS,
       },
     })
+
+    const user = await tx.user.findUnique({
+      where: { id: input.userId },
+      select: { email: true },
+    })
+
+    return { session, userEmail: user?.email || null }
   })
 
-  return { session, rawToken, expiresAt }
+  if (sendNewDeviceAlert) {
+    queueNewDeviceAlert({
+      session,
+      userEmail,
+    })
+  }
+
+  return { session, rawToken, expiresAt, isNewDevice: session.isNewDevice }
+}
+
+function queueNewDeviceAlert(input: {
+  session: {
+    isNewDevice: boolean
+    browser: string
+    os: string
+    ipAddress: string
+    deviceName: string
+    createdAt: Date
+  }
+  userEmail: string | null
+}) {
+  if (!input.session.isNewDevice || !input.userEmail) return
+  const userEmail = input.userEmail
+
+  setImmediate(async () => {
+    try {
+      await sendNewDeviceLoginEmail({
+        to: userEmail,
+        loginTime: input.session.createdAt,
+        browser: input.session.browser,
+        os: input.session.os,
+        ipAddress: input.session.ipAddress,
+        deviceName: input.session.deviceName,
+      })
+
+      await handleSuspiciousLoginSignal()
+    } catch (err) {
+      console.error('[auth-sessions] Failed to send new device alert', err)
+    }
+  })
+}
+
+async function handleSuspiciousLoginSignal() {
+  // Reserved hook for future anomaly detection like impossible travel or geo mismatch.
 }
 
 export async function validateSessionToken(token: string | null): Promise<SessionContext | null> {
@@ -253,6 +358,7 @@ export async function validateSessionToken(token: string | null): Promise<Sessio
       os: session.os,
       ipAddress: session.ipAddress,
       userAgent: session.userAgent,
+      isNewDevice: session.isNewDevice,
       lastActiveAt: session.lastActiveAt,
       expiresAt: session.expiresAt,
       revokedAt: session.revokedAt,
@@ -351,6 +457,7 @@ export async function listActiveSessions(userId: string) {
       os: true,
       ipAddress: true,
       userAgent: true,
+      isNewDevice: true,
       lastActiveAt: true,
       expiresAt: true,
       createdAt: true,

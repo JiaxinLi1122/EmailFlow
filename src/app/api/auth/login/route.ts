@@ -47,7 +47,7 @@ export async function POST(req: Request) {
       })
     }
 
-    const { rawToken } = await createUserSession({
+    const { rawToken, isNewDevice } = await createUserSession({
       userId: user.id,
       remember: !!rememberMe,
       request: req,
@@ -58,6 +58,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       requiresTwoFactor: false,
+      isNewDevice,
       data: { id: user.id, email: user.email, name: user.name },
     })
   } catch (err) {

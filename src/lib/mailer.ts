@@ -24,3 +24,43 @@ export async function sendPasswordResetEmail(to: string, resetLink: string) {
     `,
   })
 }
+
+export async function sendNewDeviceLoginEmail(input: {
+  to: string
+  loginTime: Date
+  browser: string
+  os: string
+  ipAddress: string
+  deviceName: string
+}) {
+  const loginTimeText = input.loginTime.toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  })
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    to: input.to,
+    subject: 'New device sign-in to your EmailFlow account',
+    text: [
+      'We noticed a sign-in from a new device.',
+      '',
+      `Time: ${loginTimeText}`,
+      `Device: ${input.deviceName}`,
+      `Browser: ${input.browser}`,
+      `OS: ${input.os}`,
+      `IP Address: ${input.ipAddress || 'Unavailable'}`,
+      '',
+      "If this was you, no action is needed. If this wasn't you, please reset your password and review active sessions immediately.",
+    ].join('\n'),
+    html: `
+      <p>We noticed a sign-in from a new device.</p>
+      <p><strong>Time:</strong> ${loginTimeText}</p>
+      <p><strong>Device:</strong> ${input.deviceName}</p>
+      <p><strong>Browser:</strong> ${input.browser}</p>
+      <p><strong>OS:</strong> ${input.os}</p>
+      <p><strong>IP Address:</strong> ${input.ipAddress || 'Unavailable'}</p>
+      <p>If this was you, no action is needed. If this wasn't you, please reset your password and review active sessions immediately.</p>
+    `,
+  })
+}

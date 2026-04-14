@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { AuthShell } from '@/components/auth-shell'
 import { InlineNotice } from '@/components/inline-notice'
@@ -49,6 +50,9 @@ export default function SignInPage() {
       // before the background refetch completes. Without this, the cache still
       // holds null from the post-logout refetch and the dashboard redirects away.
       queryClient.setQueryData(['auth-user'], data.data)
+      if (data.isNewDevice) {
+        toast.warning('New device detected. If this wasn’t you, please secure your account.')
+      }
       router.push('/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')

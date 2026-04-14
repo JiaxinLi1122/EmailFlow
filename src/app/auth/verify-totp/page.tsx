@@ -6,6 +6,7 @@ import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { AuthShell } from '@/components/auth-shell'
 import { InlineNotice } from '@/components/inline-notice'
@@ -42,6 +43,10 @@ function VerifyTotpContent() {
       if (!data.success) {
         setError(data.error || 'Verification failed')
         return
+      }
+
+      if (data.isNewDevice) {
+        toast.warning('New device detected. If this wasn’t you, please secure your account.')
       }
 
       router.push('/dashboard')
