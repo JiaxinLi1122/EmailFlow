@@ -50,7 +50,15 @@ export function Header() {
         type: 'active',
       })
       router.refresh()
-      const syncData = data?.data as { syncedCount: number; skippedCount: number; failedCount: number; review?: BatchClassificationReviewPayload | null } | undefined
+      const syncData = data?.data as {
+        syncedCount: number
+        skippedCount: number
+        failedCount: number
+        retriedSuccessCount: number
+        retriedFailedCount: number
+        pendingFailedCount: number
+        review?: BatchClassificationReviewPayload | null
+      } | undefined
       const review = (syncData?.review ?? null) as BatchClassificationReviewPayload | null
 
       if (review && review.items.length > 0) {
@@ -61,15 +69,28 @@ export function Header() {
       const synced = syncData?.syncedCount ?? 0
       const skipped = syncData?.skippedCount ?? 0
       const failed = syncData?.failedCount ?? 0
-      const hasPartial = skipped > 0 || failed > 0
+      const retriedSuccess = syncData?.retriedSuccessCount ?? 0
+      const retriedFailed = syncData?.retriedFailedCount ?? 0
+      const pendingFailed = syncData?.pendingFailedCount ?? 0
 
-      if (hasPartial) {
-        const parts = [`Synced ${synced} emails`]
-        if (skipped > 0) parts.push(`${skipped} skipped`)
-        if (failed > 0) parts.push(`${failed} failed`)
-        toast.success(parts.join(', '))
+      // Build the primary line
+      const primaryParts = [`Synced ${synced} emails`]
+      if (skipped > 0) primaryParts.push(`${skipped} skipped`)
+      if (failed > 0) primaryParts.push(`${failed} failed`)
+      const primaryMessage = primaryParts.join(', ')
+
+      // Build optional retry context lines
+      const retryLines: string[] = []
+      if (retriedSuccess > 0) retryLines.push(`Recovered ${retriedSuccess} previously failed email${retriedSuccess === 1 ? '' : 's'}`)
+      if (pendingFailed > 0) retryLines.push(`${pendingFailed} failed email${pendingFailed === 1 ? '' : 's'} still pending retry`)
+      if (retriedFailed > 0 && pendingFailed === 0) retryLines.push(`${retriedFailed} email${retriedFailed === 1 ? '' : 's'} could not be recovered`)
+
+      const fullMessage = [primaryMessage, ...retryLines].join(' · ')
+
+      if (review && review.items.length > 0) {
+        toast.success(`${fullMessage} · review new project guesses`)
       } else {
-        toast.success(review && review.items.length > 0 ? 'Email sync complete, review new project guesses' : `Synced ${synced} emails`)
+        toast.success(fullMessage)
       }
     },
 

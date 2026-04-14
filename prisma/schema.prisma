@@ -40,6 +40,7 @@ model User {
   accounts             Account[]
   sessions             Session[]
   passwordResetTokens  PasswordResetToken[]
+  failedEmailSyncs     FailedEmailSync[]
 }
 
 model Account {
@@ -247,6 +248,26 @@ model ProjectContext {
   @@index([userId])
   @@index([identityId])
   @@unique([userId, name])
+}
+
+model FailedEmailSync {
+  id             String    @id @default(cuid())
+  userId         String
+  gmailMessageId String
+  threadId       String?
+  receivedAt     DateTime?
+  subject        String?
+  sender         String?
+  errorReason    String
+  retryCount     Int       @default(0)
+  status         String    @default("pending") // pending | retrying | resolved | permanent_failed
+  firstFailedAt  DateTime  @default(now())
+  lastFailedAt   DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gmailMessageId])
 }
 
 model ThreadMemory {
