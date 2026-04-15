@@ -7,6 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RetentionStatus {
+  ACTIVE
+  ARCHIVED
+  METADATA_ONLY
+  PURGED
+}
+
+enum ProtectionRuleType {
+  CONTACT  // specific sender email address
+  DOMAIN   // sender email domain (e.g. acme.com)
+  LABEL    // Gmail label name (e.g. STARRED, IMPORTANT)
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -47,6 +60,10 @@ model User {
   failedEmailSyncs     FailedEmailSync[]
   stepUpChallenges     StepUpChallenge[]
   stepUpTokens         StepUpToken[]
+
+  retentionPolicy  RetentionPolicy?
+  protectionRules  ProtectionRule[]
+  retentionJobLogs RetentionJobLog[]
 }
 
 model Account {
@@ -123,11 +140,21 @@ model Email {
   processedAt DateTime?
   createdAt   DateTime  @default(now())
 
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  taskLinks TaskEmail[]
+  // Retention fields — all nullable / defaulted so existing rows are unaffected
+  retentionStatus RetentionStatus @default(ACTIVE)
+  archivedAt      DateTime?
+  metadataOnlyAt  DateTime?
+  purgedAt        DateTime?
+  restorableUntil DateTime?  // deadline for restoring from METADATA_ONLY
+  retentionReason String?    // audit trail: why this status was applied
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskLinks   TaskEmail[]
+  attachments Attachment[]
 
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, classification, receivedAt(sort: Desc)])
+  @@index([userId, retentionStatus, receivedAt(sort: Desc)])
 }
 
 model Task {
@@ -363,4 +390,93 @@ model ThreadMemory {
   matter MatterMemory? @relation(fields: [matterId], references: [id])
 
   @@unique([userId, threadId])
+}
+
+// ---------------------------------------------------------------------------
+// Retention & Cleanup Models
+// ---------------------------------------------------------------------------
+
+// Tracks individual email attachments (replaces the hasAttachments boolean for
+// retention purposes). Actual files live on Gmail; purgedAt marks that the local
+// tracking record has been cleared and the attachment can no longer be fetched.
+model Attachment {
+  id                String    @id @default(cuid())
+  emailId           String
+  filename          String
+  mimeType          String    @default("")
+  size              Int       @default(0)  // bytes; 0 if unknown
+  gmailAttachmentId String?               // used to re-fetch from Gmail API
+  purgedAt          DateTime?             // set when local record is cleared
+  createdAt         DateTime  @default(now())
+
+  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+}
+
+// Per-user configurable retention thresholds. Created on first access with
+// sensible defaults matching the product spec.
+model RetentionPolicy {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // General emails (no associated completed task)
+  // Days are measured from email.receivedAt
+  metadataOnlyAfterDays Int @default(30)
+  purgeAfterDays        Int @default(90)
+
+  // Emails linked to completed tasks
+  // taskDoneArchiveAfterDays: days after task.completedAt (0 = immediately on completion)
+  // taskDoneMetadataOnlyAfterDays: days after email.archivedAt
+  // taskDoneRestoreWindowDays: how long after metadataOnlyAt the user can restore
+  taskDoneArchiveAfterDays      Int @default(0)
+  taskDoneMetadataOnlyAfterDays Int @default(30)
+  taskDoneRestoreWindowDays     Int @default(30)
+
+  // Attachment cleanup: days from email.receivedAt before purging attachment records
+  attachmentPurgeAfterDays Int @default(60)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Whitelist rules that permanently protect matching emails from cleanup.
+// A single matching rule is sufficient to protect an email.
+model ProtectionRule {
+  id       String             @id @default(cuid())
+  userId   String
+  ruleType ProtectionRuleType
+  // value semantics by type:
+  //   CONTACT → full sender email (e.g. alice@example.com)
+  //   DOMAIN  → domain without @ (e.g. acme.com)
+  //   LABEL   → Gmail label name (e.g. STARRED, IMPORTANT)
+  value    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ruleType, value])
+  @@index([userId])
+}
+
+// Audit log for each cleanup run (cron or manual).
+model RetentionJobLog {
+  id                String    @id @default(cuid())
+  userId            String
+  triggeredBy       String    @default("cron")  // "cron" | "manual"
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  emailsArchived    Int       @default(0)
+  emailsMetaOnly    Int       @default(0)
+  emailsPurged      Int       @default(0)
+  attachmentsPurged Int       @default(0)
+  bytesFreed        BigInt    @default(0)
+  errorCount        Int       @default(0)
+  errors            Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt(sort: Desc)])
 }
