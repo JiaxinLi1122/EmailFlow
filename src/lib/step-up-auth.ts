@@ -30,7 +30,7 @@ import { prisma } from '@/lib/prisma'
 import { sendStepUpOtpEmail } from '@/lib/mailer'
 import { verify } from 'otplib'
 
-export type StepUpAction = 'change_password' | 'disable_totp' | 'delete_account'
+export type StepUpAction = 'change_password' | 'disable_totp' | 'delete_account' | 'run_cleanup'
 
 const OTP_TTL_MS = 10 * 60 * 1000  // 10 minutes
 const STEP_UP_TOKEN_TTL_MS = 5 * 60 * 1000  // 5 minutes

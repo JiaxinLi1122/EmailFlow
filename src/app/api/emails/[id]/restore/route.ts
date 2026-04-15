@@ -1,0 +1,35 @@
+/**
+ * POST /api/emails/[id]/restore
+ *
+ * Restores the body of a METADATA_ONLY email by re-fetching it from Gmail.
+ * Fails if:
+ *  - Email doesn't belong to the authenticated user
+ *  - Email is not in METADATA_ONLY status
+ *  - The restore window has expired
+ *  - Gmail cannot return the message (deleted, token invalid, etc.)
+ */
+
+import { getAuthUser, success, error, errorFromException } from '@/lib/api-helpers'
+import { restoreEmail } from '@/services/retention-service'
+
+export const dynamic = 'force-dynamic'
+
+export async function POST(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const user = await getAuthUser()
+    const { id: emailId } = await params
+
+    const result = await restoreEmail(user.id, emailId)
+
+    if (!result.success) {
+      return error('RESTORE_FAILED', result.reason, 400)
+    }
+
+    return success({ restored: true, emailId: result.emailId })
+  } catch (err) {
+    return errorFromException(err, 'RESTORE_FAILED', 'Failed to restore email', 500)
+  }
+}
