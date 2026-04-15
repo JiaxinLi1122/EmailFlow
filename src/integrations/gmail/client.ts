@@ -415,3 +415,28 @@ export const gmailProvider: EmailProvider = {
     })
   },
 }
+
+/**
+ * Fetches the full body of a single Gmail message by its provider message ID.
+ * Used by the retention restore flow to re-hydrate METADATA_ONLY emails.
+ * Handles token refresh automatically via getAuthenticatedClient.
+ *
+ * Returns the extracted plain text body, or empty string if the message
+ * cannot be fetched (deleted from Gmail, permissions revoked, etc.).
+ */
+export async function fetchGmailMessageBody(
+  userId: string,
+  gmailMessageId: string
+): Promise<string> {
+  const auth = await getAuthenticatedClient(userId)
+  const gmail = google.gmail({ version: 'v1', auth })
+
+  const res = await gmail.users.messages.get({
+    userId: 'me',
+    id: gmailMessageId,
+    format: 'full',
+  })
+
+  if (!res.data.payload) return ''
+  return extractBody(res.data.payload)
+}
