@@ -49,6 +49,8 @@ export type PolicySnapshot = {
   taskDoneMetadataOnlyAfterDays: number
   /** Days from email.metadataOnlyAt during which the email can be restored (default 30) */
   taskDoneRestoreWindowDays: number
+  /** Days from receivedAt before attachment tracking records are cleared (default 60) */
+  attachmentPurgeAfterDays: number
 }
 
 export type ProtectionRuleSnapshot = {
@@ -327,4 +329,5 @@ export const DEFAULT_RETENTION_POLICY: PolicySnapshot = {
   taskDoneArchiveAfterDays: 0,
   taskDoneMetadataOnlyAfterDays: 30,
   taskDoneRestoreWindowDays: 30,
+  attachmentPurgeAfterDays: 60,
 }

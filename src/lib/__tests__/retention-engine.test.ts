@@ -168,6 +168,7 @@ describe('General email — custom policy', () => {
     ...DEFAULT_RETENTION_POLICY,
     metadataOnlyAfterDays: 7,
     purgeAfterDays: 14,
+    attachmentPurgeAfterDays: 7,
   }
 
   it('applies custom thresholds', () => {
