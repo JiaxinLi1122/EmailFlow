@@ -12,6 +12,8 @@ import { InlineNotice } from '@/components/inline-notice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
+export const dynamic = 'force-dynamic'
+
 export default function SignInPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
