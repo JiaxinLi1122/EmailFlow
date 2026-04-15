@@ -69,13 +69,13 @@ export function RetentionPolicyCard() {
   const { data: policyRes, isLoading: policyLoading } = useQuery({
     queryKey: ['retention-policy'],
     queryFn: () => fetch('/api/settings/retention-policy').then((r) => r.json()),
-    staleTime: CACHE_TIME.settings ?? 60_000,
+    staleTime: CACHE_TIME.list,
   })
 
   const { data: rulesRes, isLoading: rulesLoading } = useQuery({
     queryKey: ['retention-whitelist'],
     queryFn: () => fetch('/api/settings/retention-whitelist').then((r) => r.json()),
-    staleTime: CACHE_TIME.settings ?? 60_000,
+    staleTime: CACHE_TIME.list,
   })
 
   const policy: RetentionPolicy | null = policyRes?.data ?? null
