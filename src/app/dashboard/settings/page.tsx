@@ -34,6 +34,7 @@ import {
 import { toast } from 'sonner'
 import { CACHE_TIME } from '@/lib/query-cache'
 import { requestStepUp, verifyStepUp, type StepUpAction } from '@/lib/step-up-client'
+import { RetentionPolicyCard } from '@/components/retention-policy-card'
 
 type CurrentUser = {
   email?: string | null
@@ -371,6 +372,8 @@ export default function SettingsPage() {
       <TwoFactorCard totpEnabled={Boolean(currentUser?.totpEnabled)} onDisabled={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })} />
 
       <DeviceSessionsCard currentSessionId={currentUser?.currentSessionId || null} onLogoutCurrent={() => logout()} />
+
+      <RetentionPolicyCard />
 
       <DangerZoneCard onDeleted={() => logout()} />
 

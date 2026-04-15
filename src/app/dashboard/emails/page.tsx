@@ -43,6 +43,8 @@ type EmailItem = {
   accountEmail?: string | null
   hasAttachments?: boolean | null
   threadId?: string | null
+  retentionStatus?: string | null
+  restorableUntil?: string | null
   project?: { id: string; name: string; identity: { id: string; name: string } | null } | null
   matter?: { id: string; title: string } | null
 }
@@ -620,6 +622,9 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
         <span className="flex-shrink-0 text-xs text-gray-400">{formatDate(email.receivedAt)}</span>
       </Link>
 
+      {/* Retention status badge */}
+      <RetentionBadge status={email.retentionStatus} />
+
       {/* Linked task badges */}
       {linkedTasks.length > 0 && (
         <div className="flex items-center gap-1.5 shrink-0">
@@ -638,6 +643,21 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+function RetentionBadge({ status }: { status?: string | null }) {
+  if (!status || status === 'ACTIVE') return null
+  const cfg = {
+    ARCHIVED:      { label: 'Archived',  className: 'border-gray-200 bg-gray-50 text-gray-500' },
+    METADATA_ONLY: { label: 'Body only', className: 'border-amber-200 bg-amber-50 text-amber-700' },
+    PURGED:        { label: 'Purged',    className: 'border-red-200 bg-red-50 text-red-600' },
+  }[status] ?? null
+  if (!cfg) return null
+  return (
+    <Badge variant="outline" className={`shrink-0 text-[10px] py-0 ${cfg.className}`}>
+      {cfg.label}
+    </Badge>
   )
 }
 

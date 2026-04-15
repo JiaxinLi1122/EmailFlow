@@ -22,7 +22,7 @@ import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import {
   ArrowLeft, Mail, Paperclip, Clock, ArrowUpRight,
   CheckSquare, Sparkles, Shield, Plus, Tag, X,
-  UserRound, ChevronRight, FolderOpen, Pencil,
+  UserRound, ChevronRight, FolderOpen, Pencil, Loader2, Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -55,6 +55,7 @@ export default function EmailDetailPage() {
   const [taskSummary, setTaskSummary] = useState('')
   const [linkedEmailIds, setLinkedEmailIds] = useState<string[]>([])
   const [creatingTask, setCreatingTask] = useState(false)
+  const [restoring, setRestoring] = useState(false)
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['email', emailId],
@@ -64,6 +65,24 @@ export default function EmailDetailPage() {
   })
 
   const email = res?.data
+
+  async function handleRestore() {
+    setRestoring(true)
+    try {
+      const r = await fetch(`/api/emails/${emailId}/restore`, { method: 'POST' })
+      const json = await r.json()
+      if (!r.ok) {
+        toast.error(json?.error?.message || json?.error || 'Restore failed')
+      } else {
+        toast.success('Email body restored')
+        queryClient.invalidateQueries({ queryKey: ['email', emailId] })
+      }
+    } catch {
+      toast.error('Restore failed')
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   const handleClassify = async (newClass: string) => {
     setClassifying(true)
@@ -278,11 +297,47 @@ export default function EmailDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Retention restore banner — only shown for METADATA_ONLY emails */}
+          {email.retentionStatus === 'METADATA_ONLY' && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm">
+              <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <div className="flex-1 space-y-1">
+                <p className="font-medium text-amber-900">Email body has been removed</p>
+                <p className="text-xs text-amber-700">
+                  {email.restorableUntil
+                    ? `Restorable until ${new Date(email.restorableUntil).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}.`
+                    : 'Restore window may be limited.'}
+                  {' '}Re-fetches the original content from Gmail.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5 border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                onClick={handleRestore}
+                disabled={restoring}
+              >
+                {restoring && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Restore body
+              </Button>
+            </div>
+          )}
+
+          {/* PURGED placeholder */}
+          {email.retentionStatus === 'PURGED' && (
+            <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-sm text-gray-500">
+              <Trash2 className="h-4 w-4 shrink-0 text-gray-400" />
+              <p>This email has been purged. The body and preview are no longer available.</p>
+            </div>
+          )}
+
           {/* Email body */}
           <Card className="animate-fade-in-up stagger-3 border-white/70 bg-white/95 shadow-sm">
             <CardContent className="py-5">
               <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {email.bodyFull || email.bodyPreview}
+                {email.bodyFull || email.bodyPreview || (
+                  <span className="italic text-gray-400">No body content available.</span>
+                )}
               </div>
             </CardContent>
           </Card>

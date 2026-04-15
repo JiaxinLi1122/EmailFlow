@@ -8,7 +8,7 @@
  *   4. Pass stepUpToken to the guarded endpoint
  */
 
-export type StepUpAction = 'change_password' | 'disable_totp' | 'delete_account'
+export type StepUpAction = 'change_password' | 'disable_totp' | 'delete_account' | 'run_cleanup'
 
 export async function requestStepUp(action: StepUpAction): Promise<{ method: 'totp' | 'email' }> {
   const res = await fetch('/api/auth/step-up/request', {

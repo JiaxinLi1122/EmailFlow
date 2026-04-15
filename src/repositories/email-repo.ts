@@ -114,6 +114,8 @@ export async function findEmailsPaginated(
         accountEmail: true,
         hasAttachments: true,
         threadId: true,
+        retentionStatus: true,
+        restorableUntil: true,
         taskLinks: {
           select: {
             id: true,
