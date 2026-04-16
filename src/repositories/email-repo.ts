@@ -24,6 +24,7 @@ export async function storeEmail(data: StoreEmailData) {
     receivedAt: data.message.receivedAt,
     labels: JSON.stringify(data.message.labels),
     hasAttachments: data.message.hasAttachments,
+    processingStatus: 'pending',
   }
   const existing = await prisma.email.findUnique({
     where: { gmailMessageId: data.message.providerMessageId },
@@ -60,6 +61,7 @@ export async function updateClassification(
       classReasoning: classification.reasoning,
       isWorkRelated: classification.isWorkRelated,
       processedAt: new Date(),
+      processingStatus: 'done',
     },
   })
 }
@@ -72,6 +74,7 @@ export async function markClassificationFailed(emailId: string) {
       classConfidence: 0,
       classReasoning: 'Classification failed - needs manual review',
       processedAt: new Date(),
+      processingStatus: 'failed',
     },
   })
 }
@@ -111,6 +114,7 @@ export async function findEmailsPaginated(
         bodyPreview: true,
         receivedAt: true,
         classification: true,
+        processingStatus: true,
         accountEmail: true,
         hasAttachments: true,
         threadId: true,

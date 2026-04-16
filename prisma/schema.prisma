@@ -137,6 +137,10 @@ model Email {
   classReasoning  String?
   isWorkRelated   Boolean?
 
+  // Processing pipeline status — set to 'pending' on store, updated after AI runs.
+  // Default 'done' preserves correctness for rows created before this field existed.
+  processingStatus String @default("done") // pending | done | failed
+
   processedAt DateTime?
   createdAt   DateTime  @default(now())
 
@@ -154,6 +158,7 @@ model Email {
 
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, classification, receivedAt(sort: Desc)])
+  @@index([userId, processingStatus, receivedAt(sort: Desc)])
   @@index([userId, retentionStatus, receivedAt(sort: Desc)])
 }
 

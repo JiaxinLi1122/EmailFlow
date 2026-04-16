@@ -9,7 +9,7 @@ import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
 import {
   CheckSquare, Paperclip, Mail,
-  Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen,
+  Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen, Loader2,
 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
@@ -39,6 +39,7 @@ type EmailItem = {
   bodyPreview?: string | null
   receivedAt: string
   classification?: EmailClassification | null
+  processingStatus?: string | null
   taskLinks?: EmailTaskLink[]
   accountEmail?: string | null
   hasAttachments?: boolean | null
@@ -188,6 +189,7 @@ export default function EmailsPage() {
   ).length
   const infoCount = emails.filter((e) => e.classification === 'awareness').length
   const uncertainCount = emails.filter((e) => e.classification === 'uncertain').length
+  const pendingCount = emails.filter((e) => e.processingStatus === 'pending').length
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'actionable', label: 'Actionable', count: actionableCount },
@@ -389,6 +391,17 @@ export default function EmailsPage() {
           </div>
         </div>
       </div>
+
+      {/* Processing banner — shown when freshly synced emails are awaiting AI classification */}
+      {!isLoading && pendingCount > 0 && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-700">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
+          <span>
+            <span className="font-medium">{pendingCount} email{pendingCount === 1 ? '' : 's'}</span>
+            {' '}being classified — visible now in All Mail, tags appear once AI finishes.
+          </span>
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (
@@ -602,7 +615,7 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
         href={`/dashboard/emails/${email.id}`}
         className="flex items-center gap-3 min-w-0 flex-1"
       >
-        <ClassBadge classification={email.classification} />
+        <ClassBadge classification={email.classification} processingStatus={email.processingStatus} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className={`truncate font-medium text-gray-900 ${compact ? 'text-xs' : 'text-sm'}`}>{email.subject}</p>
@@ -662,7 +675,15 @@ function RetentionBadge({ status }: { status?: string | null }) {
 }
 
 /* ========== SHARED COMPONENTS ========== */
-function ClassBadge({ classification }: { classification?: string | null }) {
+function ClassBadge({ classification, processingStatus }: { classification?: string | null; processingStatus?: string | null }) {
+  if (!classification && processingStatus === 'pending') {
+    return (
+      <Badge variant="outline" className="w-[84px] justify-center gap-1 text-[10px] bg-gray-50 text-gray-400 border-gray-200">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Processing
+      </Badge>
+    )
+  }
   const cfg = getEmailClassConfig(classification)
   const Icon = cfg.icon
   return (
