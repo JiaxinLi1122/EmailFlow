@@ -103,14 +103,14 @@ export default function EmailsPage() {
   const [page, setPage] = useState(1)
 
   // Sync batch — read batchId from sessionStorage (written by header after sync).
-  const [syncBatchId, setSyncBatchId] = useState<string | null>(null)
+  // Lazy initializer runs once on the client; returns null during SSR.
+  const [syncBatchId] = useState<string | null>(() =>
+    typeof window !== 'undefined'
+      ? sessionStorage.getItem('emailflow:syncBatchId')
+      : null
+  )
   const [batchDismissed, setBatchDismissed] = useState(false)
   const [showBatchModal, setShowBatchModal] = useState(false)
-
-  useEffect(() => {
-    const stored = sessionStorage.getItem('emailflow:syncBatchId')
-    if (stored) setSyncBatchId(stored)
-  }, [])
 
   const { data: batchStatus } = useQuery<BatchStatus>({
     queryKey: ['syncBatch', syncBatchId],
