@@ -137,6 +137,10 @@ model Email {
   classReasoning  String?
   isWorkRelated   Boolean?
 
+  // Set on store to group all emails from a single sync run together.
+  // Null for emails stored before this field was introduced.
+  syncBatchId String?
+
   // Processing pipeline status — set to 'pending' on store, updated after AI runs.
   // Default 'done' preserves correctness for rows created before this field existed.
   processingStatus String @default("done") // pending | done | failed
@@ -159,6 +163,7 @@ model Email {
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, classification, receivedAt(sort: Desc)])
   @@index([userId, processingStatus, receivedAt(sort: Desc)])
+  @@index([userId, syncBatchId])
   @@index([userId, retentionStatus, receivedAt(sort: Desc)])
 }
 

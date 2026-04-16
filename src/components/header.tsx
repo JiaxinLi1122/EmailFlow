@@ -88,10 +88,16 @@ export function Header() {
         skippedCount: number
         failedCount: number
         pendingFailedCount: number
+        syncBatchId: string
         processing: boolean
       } | undefined
 
       const processing = syncData?.processing ?? false
+
+      // Store the batch ID so the Emails page can poll for action-email results.
+      if (processing && syncData?.syncBatchId) {
+        sessionStorage.setItem('emailflow:syncBatchId', syncData.syncBatchId)
+      }
 
       setSyncResult({
         ok: true,

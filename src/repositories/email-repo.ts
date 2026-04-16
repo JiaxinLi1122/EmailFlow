@@ -9,6 +9,7 @@ import type { EmailMessage } from '@/integrations'
 export interface StoreEmailData {
   userId: string
   message: EmailMessage
+  syncBatchId?: string
 }
 
 export async function storeEmail(data: StoreEmailData) {
@@ -25,6 +26,7 @@ export async function storeEmail(data: StoreEmailData) {
     labels: JSON.stringify(data.message.labels),
     hasAttachments: data.message.hasAttachments,
     processingStatus: 'pending',
+    syncBatchId: data.syncBatchId,
   }
   const existing = await prisma.email.findUnique({
     where: { gmailMessageId: data.message.providerMessageId },
@@ -208,6 +210,41 @@ export async function findEmailById(userId: string, emailId: string) {
   } catch (err) {
     console.error('[email-repo] detail enrichment failed:', err)
     return email
+  }
+}
+
+export async function findBatchStatus(userId: string, batchId: string) {
+  const emails = await prisma.email.findMany({
+    where: { userId, syncBatchId: batchId },
+    select: {
+      id: true,
+      subject: true,
+      sender: true,
+      receivedAt: true,
+      processingStatus: true,
+      classification: true,
+      taskLinks: {
+        select: {
+          task: { select: { id: true, title: true } },
+        },
+      },
+    },
+    orderBy: { receivedAt: 'desc' },
+  })
+
+  const totalEmails = emails.length
+  const pendingEmails = emails.filter((e) => e.processingStatus === 'pending').length
+  // A batch with 0 emails means all were skipped (already stored) — treat as complete.
+  const isComplete = totalEmails === 0 || pendingEmails === 0
+  const actionEmails = emails.filter((e) => e.classification === 'action')
+
+  return {
+    isComplete,
+    totalEmails,
+    pendingEmails,
+    actionEmailCount: actionEmails.length,
+    // Only include email details when complete so the modal has stable data.
+    actionEmails: isComplete ? actionEmails : [],
   }
 }
 

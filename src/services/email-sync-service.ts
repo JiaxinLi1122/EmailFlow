@@ -85,6 +85,7 @@ export interface Phase1Result {
   skippedCount: number
   failedCount: number
   pendingFailedCount: number
+  syncBatchId: string
   // Passed to syncEmailsPhase2 — not included in the HTTP response
   storedEmails: StoredEmail[]
 }
@@ -96,6 +97,7 @@ export interface Phase1Result {
 
 export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): Promise<Phase1Result> {
   const t0 = Date.now()
+  const syncBatchId = `sync-${Date.now()}`
 
   const syncInfo = await userRepo.getUserSyncInfo(userId)
   if (!syncInfo) throw new Error('User not found')
@@ -129,7 +131,7 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
 
   for (const message of messages) {
     try {
-      const { email, wasCreated } = await emailRepo.storeEmail({ userId, message })
+      const { email, wasCreated } = await emailRepo.storeEmail({ userId, message, syncBatchId })
       storedEmails.push(email)
       if (wasCreated) {
         syncedCount++
@@ -162,7 +164,7 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
 
   console.log(`[sync] phase1 total: ${Date.now() - t0}ms`)
 
-  return { totalFetched: messages.length, syncedCount, skippedCount, failedCount, pendingFailedCount, storedEmails }
+  return { totalFetched: messages.length, syncedCount, skippedCount, failedCount, pendingFailedCount, syncBatchId, storedEmails }
 }
 
 // ============================================================

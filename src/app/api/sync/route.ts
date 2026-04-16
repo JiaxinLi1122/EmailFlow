@@ -26,6 +26,7 @@ export async function POST() {
       skippedCount: phase1.skippedCount,
       failedCount: phase1.failedCount,
       pendingFailedCount: phase1.pendingFailedCount,
+      syncBatchId: phase1.syncBatchId,
       // true when new emails were stored and AI will classify them in the background
       processing: phase1.storedEmails.length > 0,
     })

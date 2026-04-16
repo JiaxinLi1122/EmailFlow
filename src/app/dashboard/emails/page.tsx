@@ -8,10 +8,16 @@ import { PageHeader } from '@/components/page-header'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatePanel } from '@/components/state-panel'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   CheckSquare, Paperclip, Mail,
-  Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen, Loader2,
+  Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen, Loader2, Zap,
 } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -19,6 +25,26 @@ import { format } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
 import { getEmailClassConfig } from '@/lib/email-classification'
 import { CACHE_TIME } from '@/lib/query-cache'
+
+// ---------------------------------------------------------------------------
+// Sync batch types
+// ---------------------------------------------------------------------------
+
+type BatchActionEmail = {
+  id: string
+  subject: string | null
+  sender: string | null
+  receivedAt: string
+  taskLinks: Array<{ task: { id: string; title: string } | null }>
+}
+
+type BatchStatus = {
+  isComplete: boolean
+  totalEmails: number
+  pendingEmails: number
+  actionEmailCount: number
+  actionEmails: BatchActionEmail[]
+}
 
 type Tab = 'actionable' | 'informational' | 'uncertain' | 'all'
 type EmailClassification = 'action' | 'awareness' | 'ignore' | 'uncertain'
@@ -75,6 +101,46 @@ export default function EmailsPage() {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [selectingStep, setSelectingStep] = useState<'from' | 'to'>('from')
   const [page, setPage] = useState(1)
+
+  // Sync batch — read batchId from sessionStorage (written by header after sync).
+  const [syncBatchId, setSyncBatchId] = useState<string | null>(null)
+  const [batchBannerOpen, setBatchBannerOpen] = useState(true)
+  const [showBatchModal, setShowBatchModal] = useState(false)
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem('emailflow:syncBatchId')
+    if (stored) setSyncBatchId(stored)
+  }, [])
+
+  const { data: batchStatus } = useQuery<BatchStatus>({
+    queryKey: ['syncBatch', syncBatchId],
+    queryFn: async () => {
+      const r = await fetch(`/api/sync/batch/${syncBatchId}`)
+      const d = await r.json()
+      return d.data as BatchStatus
+    },
+    enabled: !!syncBatchId && batchBannerOpen,
+    refetchInterval: (query) => {
+      const data = query.state.data as BatchStatus | undefined
+      if (!data || data.isComplete) return false
+      return 3000
+    },
+    staleTime: 0,
+  })
+
+  // Silently clear when batch completes with no action emails.
+  useEffect(() => {
+    if (batchStatus?.isComplete && batchStatus.actionEmailCount === 0) {
+      sessionStorage.removeItem('emailflow:syncBatchId')
+      setBatchBannerOpen(false)
+    }
+  }, [batchStatus])
+
+  const dismissBatchBanner = () => {
+    sessionStorage.removeItem('emailflow:syncBatchId')
+    setBatchBannerOpen(false)
+    setShowBatchModal(false)
+  }
 
   const handleDayClick = (day: Date) => {
     if (selectingStep === 'from') {
@@ -392,8 +458,54 @@ export default function EmailsPage() {
         </div>
       </div>
 
-      {/* Processing banner — shown when freshly synced emails are awaiting AI classification */}
-      {!isLoading && pendingCount > 0 && (
+      {/* Sync batch banner */}
+      {!isLoading && syncBatchId && batchBannerOpen && (() => {
+        if (!batchStatus || !batchStatus.isComplete) {
+          // Classification in progress
+          const count = batchStatus?.totalEmails ?? pendingCount
+          return (
+            <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-700">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
+              <span>
+                {count > 0
+                  ? <><span className="font-medium">{count} email{count === 1 ? '' : 's'}</span>{' '}being classified — tags appear once AI finishes.</>
+                  : <>Classifying emails — tags appear once AI finishes.</>}
+              </span>
+            </div>
+          )
+        }
+        if (batchStatus.actionEmailCount > 0) {
+          return (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
+              <button
+                onClick={() => setShowBatchModal(true)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                  <Zap className="h-4 w-4 text-amber-600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {batchStatus.actionEmailCount} action email{batchStatus.actionEmailCount === 1 ? '' : 's'} found in this sync
+                  </p>
+                  <p className="text-xs text-amber-700">Tap to review — see what needs your attention.</p>
+                </div>
+              </button>
+              <button
+                onClick={dismissBatchBanner}
+                className="shrink-0 rounded-full p-1.5 text-amber-500 transition-colors hover:bg-amber-100 hover:text-amber-700"
+                title="Dismiss"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )
+        }
+        return null
+      })()}
+
+      {/* Fallback processing banner — shown when no active batch but pending emails exist */}
+      {!isLoading && (!syncBatchId || !batchBannerOpen) && pendingCount > 0 && (
         <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-700">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
           <span>
@@ -401,6 +513,14 @@ export default function EmailsPage() {
             {' '}being classified — visible now in All Mail, tags appear once AI finishes.
           </span>
         </div>
+      )}
+
+      {/* Sync batch modal */}
+      {showBatchModal && batchStatus && (
+        <SyncBatchModal
+          batchStatus={batchStatus}
+          onClose={() => setShowBatchModal(false)}
+        />
       )}
 
       {/* Content */}
@@ -443,6 +563,79 @@ export default function EmailsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/* ========== SYNC BATCH MODAL ========== */
+
+function SyncBatchModal({
+  batchStatus,
+  onClose,
+}: {
+  batchStatus: BatchStatus
+  onClose: () => void
+}) {
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-500" />
+            {batchStatus.actionEmailCount} Action Email{batchStatus.actionEmailCount === 1 ? '' : 's'} — Last Sync
+          </DialogTitle>
+        </DialogHeader>
+
+        <p className="text-sm text-gray-500">
+          These emails were classified as <span className="font-medium text-gray-700">Action</span> during the latest sync.
+          Emails with a linked task were handled automatically.
+        </p>
+
+        <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
+          {batchStatus.actionEmails.map((email) => {
+            const linkedTasks = email.taskLinks
+              .map((l) => l.task)
+              .filter((t): t is { id: string; title: string } => t != null)
+
+            return (
+              <Link
+                key={email.id}
+                href={`/dashboard/emails/${email.id}`}
+                onClick={onClose}
+                className="flex items-start gap-3 rounded-xl border border-gray-200/80 bg-white px-4 py-3 text-left transition-all hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-sm"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-900">
+                    {email.subject || '(no subject)'}
+                  </p>
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <p className="truncate text-xs text-gray-500">
+                      {email.sender?.split('<')[0]?.trim() || email.sender}
+                    </p>
+                    <span className="text-[10px] text-gray-300">&middot;</span>
+                    <p className="shrink-0 text-xs text-gray-400">
+                      {formatDate(email.receivedAt)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="shrink-0">
+                  {linkedTasks.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-600">
+                      <CheckSquare className="h-2.5 w-2.5" />
+                      Task created
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                      No task yet
+                    </span>
+                  )}
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
