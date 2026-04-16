@@ -10,9 +10,9 @@
  * emails that the engine classifies as 'none' (protected or within window).
  */
 
-import { addDays, differenceInDays } from 'date-fns'
+import { differenceInDays } from 'date-fns'
 import { getRetentionAction } from '@/lib/retention-engine'
-import type { EmailSnapshot, PolicySnapshot, ProtectionRuleSnapshot } from '@/lib/retention-engine'
+import type { EmailSnapshot, PolicySnapshot } from '@/lib/retention-engine'
 import * as retentionRepo from '@/repositories/retention-repo'
 import * as attachmentRepo from '@/repositories/attachment-repo'
 import { fetchGmailMessageBody } from '@/integrations/gmail/client'

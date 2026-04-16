@@ -104,7 +104,7 @@ export default function EmailsPage() {
 
   // Sync batch — read batchId from sessionStorage (written by header after sync).
   const [syncBatchId, setSyncBatchId] = useState<string | null>(null)
-  const [batchBannerOpen, setBatchBannerOpen] = useState(true)
+  const [batchDismissed, setBatchDismissed] = useState(false)
   const [showBatchModal, setShowBatchModal] = useState(false)
 
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function EmailsPage() {
       const d = await r.json()
       return d.data as BatchStatus
     },
-    enabled: !!syncBatchId && batchBannerOpen,
+    enabled: !!syncBatchId && !batchDismissed,
     refetchInterval: (query) => {
       const data = query.state.data as BatchStatus | undefined
       if (!data || data.isComplete) return false
@@ -128,17 +128,22 @@ export default function EmailsPage() {
     staleTime: 0,
   })
 
-  // Silently clear when batch completes with no action emails.
+  // Derived: show the banner unless dismissed or the batch completed with no action emails.
+  const batchBannerActive =
+    !!syncBatchId &&
+    !batchDismissed &&
+    !(batchStatus?.isComplete && batchStatus.actionEmailCount === 0)
+
+  // Side effect only: clean sessionStorage when a batch silently completes (no actions).
   useEffect(() => {
     if (batchStatus?.isComplete && batchStatus.actionEmailCount === 0) {
       sessionStorage.removeItem('emailflow:syncBatchId')
-      setBatchBannerOpen(false)
     }
   }, [batchStatus])
 
   const dismissBatchBanner = () => {
     sessionStorage.removeItem('emailflow:syncBatchId')
-    setBatchBannerOpen(false)
+    setBatchDismissed(true)
     setShowBatchModal(false)
   }
 
@@ -459,7 +464,7 @@ export default function EmailsPage() {
       </div>
 
       {/* Sync batch banner */}
-      {!isLoading && syncBatchId && batchBannerOpen && (() => {
+      {!isLoading && batchBannerActive && (() => {
         if (!batchStatus || !batchStatus.isComplete) {
           // Classification in progress
           const count = batchStatus?.totalEmails ?? pendingCount
@@ -505,7 +510,7 @@ export default function EmailsPage() {
       })()}
 
       {/* Fallback processing banner — shown when no active batch but pending emails exist */}
-      {!isLoading && (!syncBatchId || !batchBannerOpen) && pendingCount > 0 && (
+      {!isLoading && !batchBannerActive && pendingCount > 0 && (
         <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-700">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
           <span>
