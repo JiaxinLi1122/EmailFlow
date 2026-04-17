@@ -7,23 +7,29 @@ export async function GET() {
   try {
     const context = await requireCurrentSessionContext()
 
-    const user = await prisma.user.findUnique({
-      where: { id: context.user.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        isAdmin: true,
-        gmailEmail: true,
-        syncStartDate: true,
-        timezone: true,
-        totpEnabled: true,
-        emailProviderReauthRequired: true,
-        emailProviderReauthReason: true,
-        emailProviderReauthAt: true,
-        emailProviderReauthProvider: true,
-      },
-    })
+    const [user, googleAccount] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: context.user.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isAdmin: true,
+          gmailEmail: true,
+          syncStartDate: true,
+          timezone: true,
+          totpEnabled: true,
+          emailProviderReauthRequired: true,
+          emailProviderReauthReason: true,
+          emailProviderReauthAt: true,
+          emailProviderReauthProvider: true,
+        },
+      }),
+      prisma.account.findFirst({
+        where: { userId: context.user.id, provider: 'google' },
+        select: { id: true },
+      }),
+    ])
 
     if (!user) {
       return NextResponse.json(
@@ -47,6 +53,7 @@ export async function GET() {
         emailProviderReauthReason: user.emailProviderReauthReason,
         emailProviderReauthAt: user.emailProviderReauthAt,
         emailProviderReauthProvider: user.emailProviderReauthProvider,
+        googleAccount: googleAccount ? { email: user.gmailEmail ?? null } : null,
         currentSessionId: context.session.id,
       },
     })

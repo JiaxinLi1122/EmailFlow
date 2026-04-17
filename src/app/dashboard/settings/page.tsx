@@ -48,6 +48,7 @@ type CurrentUser = {
   emailProviderReauthReason?: string | null
   emailProviderReauthAt?: string | null
   emailProviderReauthProvider?: string | null
+  googleAccount?: { email: string | null } | null
 }
 
 type DeviceSession = {
@@ -376,6 +377,11 @@ export default function SettingsPage() {
       <RetentionPolicyCard />
 
       <DangerZoneCard onDeleted={() => logout()} />
+
+      <GoogleAccountCard
+        googleAccount={currentUser?.googleAccount ?? null}
+        onDisconnected={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })}
+      />
 
       <Card className="border-white/80 bg-white/95 shadow-sm">
         <CardHeader className="pb-3">
@@ -1403,5 +1409,93 @@ function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
 
       <StepUpDialog open={dialogOpen} action="delete_account" method={method} onClose={() => setDialogOpen(false)} onVerified={handleVerified} />
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Google Account binding card
+// ---------------------------------------------------------------------------
+
+function GoogleAccountCard({
+  googleAccount,
+  onDisconnected,
+}: {
+  googleAccount: { email: string | null } | null
+  onDisconnected: () => void
+}) {
+  const queryClient = useQueryClient()
+  const bound = Boolean(googleAccount)
+
+  const disconnect = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/auth/google/disconnect', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || 'Disconnect failed')
+    },
+    onSuccess: () => {
+      toast.success('Google account disconnected')
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
+      onDisconnected()
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to disconnect Google account')
+    },
+  })
+
+  return (
+    <Card className="border-white/80 bg-white/95 shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <KeyRound className="h-4 w-4 text-blue-700" />
+          Google Account
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-900">Google</p>
+                <Badge
+                  variant={bound ? 'default' : 'outline'}
+                  className={bound ? 'bg-green-100 text-green-700 hover:bg-green-100' : ''}
+                >
+                  {bound ? 'Bound' : 'Not bound'}
+                </Badge>
+              </div>
+              <p className="text-sm text-gray-600">
+                {bound
+                  ? googleAccount?.email || 'Google account linked'
+                  : 'Bind your Google account to sign in with Google.'}
+              </p>
+            </div>
+
+            {bound ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
+                onClick={() => disconnect.mutate()}
+                disabled={disconnect.isPending}
+              >
+                {disconnect.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Unplug className="h-3.5 w-3.5" />
+                )}
+                Disconnect Google
+              </Button>
+            ) : (
+              <a href="/api/auth/google" className="self-start">
+                <Button size="sm" className="gap-2">
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Connect Google
+                </Button>
+              </a>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

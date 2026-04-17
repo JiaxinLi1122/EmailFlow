@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server'
 import { errorFromException } from '@/lib/api-helpers'
 import { gmailProvider } from '@/integrations'
 import { requireCurrentUser } from '@/lib/auth-session'
+import { prisma } from '@/lib/prisma'
 
 export async function POST() {
   try {
     const user = await requireCurrentUser()
-    await gmailProvider.disconnect(user.id)
+
+    await Promise.all([
+      gmailProvider.disconnect(user.id),
+      prisma.account.deleteMany({ where: { userId: user.id, provider: 'google' } }),
+    ])
 
     return NextResponse.json({ success: true })
   } catch (err) {
