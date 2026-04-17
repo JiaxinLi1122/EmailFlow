@@ -1,4 +1,5 @@
 import { AppError } from '@/lib/app-errors'
+import { logError } from '@/lib/error-log'
 import { gmailProvider } from '@/integrations'
 import { processEmail } from '@/workflows'
 import type { PipelineReviewCandidate } from '@/workflows'
@@ -96,6 +97,7 @@ export interface Phase1Result {
 // ============================================================
 
 export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): Promise<Phase1Result> {
+  try {
   const t0 = Date.now()
   const syncBatchId = `sync-${Date.now()}`
 
@@ -165,6 +167,11 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
   console.log(`[sync] phase1 total: ${Date.now() - t0}ms`)
 
   return { totalFetched: messages.length, syncedCount, skippedCount, failedCount, pendingFailedCount, syncBatchId, storedEmails }
+  } catch (err) {
+    console.error('[syncEmailsPhase1]', err)
+    await logError('syncEmailsPhase1', err, userId)
+    throw err
+  }
 }
 
 // ============================================================
@@ -174,6 +181,7 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
 // ============================================================
 
 export async function syncEmailsPhase2(userId: string, storedEmails: StoredEmail[]): Promise<void> {
+  try {
   const t0 = Date.now()
 
   // 1) Run email processing pipeline on each newly stored email
@@ -216,6 +224,11 @@ export async function syncEmailsPhase2(userId: string, storedEmails: StoredEmail
   console.log(`[sync] phase2 retryFailedEmails: ${Date.now() - tRetry}ms, success=${retriedSuccessCount}, failed=${retriedFailedCount}`)
 
   console.log(`[sync] phase2 total: ${Date.now() - t0}ms`)
+  } catch (err) {
+    console.error('[syncEmailsPhase2]', err)
+    await logError('syncEmailsPhase2', err, userId)
+    throw err
+  }
 }
 
 // ============================================================

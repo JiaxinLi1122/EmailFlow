@@ -1,4 +1,5 @@
 import { classifyEmail, extractTask, scorePriority, updateThreadMemory, matchMatter } from '@/ai'
+import { logError } from '@/lib/error-log'
 import { preFilterEmail, prepareForClassification, prepareForExtraction } from '@/ai/utils'
 import * as emailRepo from '@/repositories/email-repo'
 import * as taskRepo from '@/repositories/task-repo'
@@ -591,6 +592,7 @@ export async function processEmail(
     threadId?: string | null
   }
 ): Promise<PipelineResult> {
+  try {
   // ── 0. Pre-filter (rule-based, no AI) ─────────────────────
   const preFilter = stepPreFilter(email)
 
@@ -786,5 +788,10 @@ export async function processEmail(
     taskId: task.id,
     skippedByRule: false,
     reviewCandidate,
+  }
+  } catch (err) {
+    console.error('[processEmail]', err)
+    await logError('processEmail', err, userId)
+    throw err
   }
 }
