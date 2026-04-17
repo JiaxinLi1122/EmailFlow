@@ -348,6 +348,8 @@ function buildReviewCandidate(
   }
 }
 
+const CLASSIFY_TIMEOUT_MS = 10_000
+
 // ── Step 1: Classify ─────────────────────────────────────────
 
 async function stepClassify(
@@ -364,13 +366,20 @@ async function stepClassify(
   const rawBody = email.bodyFull || email.bodyPreview
   const cleanedBody = prepareForClassification(rawBody)
 
-  const result = await classifyEmail({
-    subject: email.subject,
-    sender: email.sender,
-    date: email.receivedAt.toISOString(),
-    bodyPreview: cleanedBody,
-    memory: memoryContext,
-  })
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('classifyEmail timeout')), CLASSIFY_TIMEOUT_MS)
+  )
+
+  const result = await Promise.race([
+    classifyEmail({
+      subject: email.subject,
+      sender: email.sender,
+      date: email.receivedAt.toISOString(),
+      bodyPreview: cleanedBody,
+      memory: memoryContext,
+    }),
+    timeout,
+  ])
 
   await emailRepo.updateClassification(email.id, result)
   return result
@@ -594,6 +603,23 @@ export async function processEmail(
 ): Promise<PipelineResult> {
   try {
   // ── 0. Pre-filter (rule-based, no AI) ─────────────────────
+  const rawBodyForCheck = email.bodyFull || email.bodyPreview
+  if (rawBodyForCheck.trim().length < 10) {
+    await emailRepo.updateClassification(email.id, {
+      category: 'uncertain',
+      confidence: 0,
+      reasoning: 'Email body too short to classify',
+      isWorkRelated: false,
+    })
+    return {
+      emailId: email.id,
+      classification: 'uncertain',
+      confidence: 0,
+      taskCreated: false,
+      skippedByRule: true,
+    }
+  }
+
   const preFilter = stepPreFilter(email)
 
   if (preFilter.skipped) {
@@ -790,8 +816,23 @@ export async function processEmail(
     reviewCandidate,
   }
   } catch (err) {
-    console.error('[processEmail]', err)
-    await logError('processEmail', err, userId)
-    throw err
+    console.error('[processEmail]', email.id, err)
+    try {
+      await logError('processEmail', err, userId)
+    } catch {
+      // log failure must not block fallback
+    }
+    try {
+      await emailRepo.markClassificationFailed(email.id)
+    } catch (dbErr) {
+      console.error('[processEmail] failed to mark email as failed', email.id, dbErr)
+    }
+    return {
+      emailId: email.id,
+      classification: 'uncertain',
+      confidence: 0,
+      taskCreated: false,
+      skippedByRule: false,
+    }
   }
 }
