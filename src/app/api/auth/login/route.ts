@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       success: true,
       requiresTwoFactor: false,
       isNewDevice,
-      data: { id: user.id, email: user.email, name: user.name },
+      data: { id: user.id, email: user.email, name: user.name, isAdmin: user.isAdmin },
     })
   } catch (err) {
     console.error('[api/auth/login]', err)

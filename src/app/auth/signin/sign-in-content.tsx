@@ -65,9 +65,9 @@ export function SignInContent() {
       // holds null from the post-logout refetch and the dashboard redirects away.
       queryClient.setQueryData(['auth-user'], data.data)
       if (data.isNewDevice) {
-        toast.warning('New device detected. If this wasn’t you, please secure your account.')
+      toast.warning("New device detected. If this wasn't you, please secure your account.")
       }
-      router.push('/dashboard')
+      router.push(data.data?.isAdmin ? '/admin/errors' : '/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
