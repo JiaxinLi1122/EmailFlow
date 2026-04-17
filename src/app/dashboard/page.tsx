@@ -667,7 +667,7 @@ export default function DashboardPage() {
             onClick={handleSyncSkip}
             className="text-center text-xs text-gray-400 transition-colors hover:text-gray-600"
           >
-            Skip — use default (15 days)
+            Skip — use default (7 days)
           </button>
         </DialogContent>
       </Dialog>

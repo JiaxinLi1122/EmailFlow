@@ -261,7 +261,7 @@ export const gmailProvider: EmailProvider = {
       let startDate = user?.syncStartDate
       if (!startDate) {
         startDate = new Date()
-        startDate.setDate(startDate.getDate() - 15)
+        startDate.setDate(startDate.getDate() - 7)
 
         await prisma.user.update({
           where: { id: userId },

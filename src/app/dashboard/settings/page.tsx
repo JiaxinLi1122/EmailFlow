@@ -232,9 +232,9 @@ export default function SettingsPage() {
   const syncSummary = (() => {
     if (!currentUser?.syncStartDate) {
       return {
-        days: 15,
-        exactPreset: 15,
-        label: 'Last 15 days',
+        days: 7,
+        exactPreset: 7,
+        label: 'Last 7 days',
         helper: 'Default sync window for new accounts.',
       }
     }
@@ -587,7 +587,7 @@ export default function SettingsPage() {
             </Popover>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {SYNC_PRESETS.map((days) => {
               const isActive = syncSummary.exactPreset === days
 
@@ -599,6 +599,11 @@ export default function SettingsPage() {
                   size="sm"
                   onClick={() => syncRangeMutation.mutate(days)}
                   disabled={isBusy}
+                  className={`transition-all duration-200 ${
+                    isActive
+                      ? 'scale-110 shadow-md ring-2 ring-blue-500/30'
+                      : 'scale-90 opacity-60 hover:opacity-80'
+                  }`}
                 >
                   {days} days
                 </Button>
