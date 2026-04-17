@@ -81,6 +81,28 @@ export async function markClassificationFailed(emailId: string) {
   })
 }
 
+// Finds emails stuck in 'pending' for longer than staleAfterMs and marks them failed.
+// Returns the number of emails fixed.
+export async function fixStuckEmails(userId: string | null, staleAfterMs = 2 * 60 * 1000): Promise<number> {
+  const cutoff = new Date(Date.now() - staleAfterMs)
+  const where = {
+    processingStatus: 'pending',
+    createdAt: { lt: cutoff },
+    ...(userId ? { userId } : {}),
+  }
+  const { count } = await prisma.email.updateMany({
+    where,
+    data: {
+      classification: 'uncertain',
+      classConfidence: 0,
+      classReasoning: 'Classification timed out - auto-resolved',
+      processedAt: new Date(),
+      processingStatus: 'failed',
+    },
+  })
+  return count
+}
+
 export async function findEmailsByClassification(
   userId: string,
   classification: string,

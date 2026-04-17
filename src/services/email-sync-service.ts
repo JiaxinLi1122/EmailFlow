@@ -184,6 +184,14 @@ export async function syncEmailsPhase2(userId: string, storedEmails: StoredEmail
   try {
   const t0 = Date.now()
 
+  // 0) Resolve any emails that have been stuck in 'pending' for > 2 minutes.
+  //    This cleans up historical data and guards against future edge-case hangs.
+  const tStuck = Date.now()
+  const stuckFixed = await emailRepo.fixStuckEmails(userId)
+  if (stuckFixed > 0) {
+    console.log(`[sync] phase2 fixStuckEmails: ${Date.now() - tStuck}ms, fixed=${stuckFixed}`)
+  }
+
   // 1) Run email processing pipeline on each newly stored email
   if (storedEmails.length > 0) {
     const tAI = Date.now()
