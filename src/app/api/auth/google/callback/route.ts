@@ -15,7 +15,6 @@ export async function GET(req: NextRequest) {
     const code = searchParams.get('code')
     const error = searchParams.get('error')
 
-    // On early errors, redirect authenticated users to dashboard and others to signup
     const errorBase = user ? '/dashboard' : '/auth/signup'
 
     if (error) {
@@ -32,6 +31,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(new URL(`${errorBase}?gmail_error=missing_google_env`, APP_URL))
     }
 
+    // --- Token exchange ---
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(new URL(`${errorBase}?gmail_error=missing_access_token`, APP_URL))
     }
 
+    // --- Fetch Google profile ---
     const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
@@ -71,7 +72,11 @@ export async function GET(req: NextRequest) {
     }
 
     const gmailEmail = profileData.email as string | undefined
+    // Google's stable account identifier — never changes even if user renames their account
+    const providerAccountId = profileData.id as string | undefined
     const expiryDate = typeof expiresIn === 'number' ? new Date(Date.now() + expiresIn * 1000) : null
+    // Account.expires_at stores Unix epoch seconds (Int? in schema)
+    const expiresAtEpoch = typeof expiresIn === 'number' ? Math.floor(Date.now() / 1000) + expiresIn : null
 
     const gmailFields = {
       gmailAccessToken: accessToken,
@@ -86,38 +91,135 @@ export async function GET(req: NextRequest) {
       ...(refreshToken ? { gmailRefreshToken: refreshToken } : {}),
     }
 
+    const accountTokenFields = {
+      access_token: accessToken,
+      expires_at: expiresAtEpoch,
+      ...(refreshToken ? { refresh_token: refreshToken } : {}),
+      ...(gmailEmail ? { email: gmailEmail } : {}),
+    }
+
+    // ----------------------------------------------------------------
+    // Path A: user is already logged in → connect Gmail to their account
+    // ----------------------------------------------------------------
     if (user) {
-      // Already logged in: connect Gmail to the existing account
-      await prisma.user.update({ where: { id: user.id }, data: gmailFields })
+      if (!providerAccountId) {
+        return NextResponse.redirect(new URL('/dashboard?gmail_error=no_provider_id', APP_URL))
+      }
+
+      // Reject if this Google account is already bound to a *different* user
+      const existingBinding = await prisma.account.findUnique({
+        where: { provider_providerAccountId: { provider: 'google', providerAccountId } },
+        select: { userId: true },
+      })
+
+      if (existingBinding && existingBinding.userId !== user.id) {
+        return NextResponse.redirect(
+          new URL('/dashboard?gmail_error=google_account_already_bound', APP_URL)
+        )
+      }
+
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: gmailFields }),
+        prisma.account.upsert({
+          where: { provider_providerAccountId: { provider: 'google', providerAccountId } },
+          create: {
+            userId: user.id,
+            type: 'oauth',
+            provider: 'google',
+            providerAccountId,
+            ...accountTokenFields,
+          },
+          update: accountTokenFields,
+        }),
+      ])
+
       return NextResponse.redirect(new URL('/dashboard?gmail_connected=1', APP_URL))
     }
 
-    // Not logged in: sign up or sign in via Google
+    // ----------------------------------------------------------------
+    // Not logged in: sign in or sign up via Google OAuth
+    // ----------------------------------------------------------------
+
     if (!gmailEmail) {
       return NextResponse.redirect(new URL('/auth/signup?gmail_error=no_email', APP_URL))
     }
 
-    // Find existing account by connected Gmail address or by matching email
-    let targetUser = await prisma.user.findFirst({
-      where: { OR: [{ gmailEmail }, { email: gmailEmail }] },
-      select: { id: true },
+    if (!providerAccountId) {
+      return NextResponse.redirect(new URL('/auth/signup?gmail_error=no_provider_id', APP_URL))
+    }
+
+    let targetUserId: string
+
+    // Case 1: Google account already bound → sign in directly
+    const existingAccount = await prisma.account.findUnique({
+      where: { provider_providerAccountId: { provider: 'google', providerAccountId } },
+      select: { userId: true },
     })
 
-    if (!targetUser) {
-      targetUser = await prisma.user.create({
-        data: {
-          email: gmailEmail,
-          name: (profileData.name as string | undefined) || gmailEmail.split('@')[0],
-          ...gmailFields,
-        },
+    if (existingAccount) {
+      targetUserId = existingAccount.userId
+
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: targetUserId }, data: gmailFields }),
+        prisma.account.update({
+          where: { provider_providerAccountId: { provider: 'google', providerAccountId } },
+          data: accountTokenFields,
+        }),
+      ])
+    } else {
+      // Case 2: No Account binding, but a User with this email already exists
+      const emailUser = await prisma.user.findFirst({
+        where: { OR: [{ gmailEmail }, { email: gmailEmail }] },
         select: { id: true },
       })
-    } else {
-      await prisma.user.update({ where: { id: targetUser.id }, data: gmailFields })
+
+      if (emailUser) {
+        targetUserId = emailUser.id
+
+        await prisma.$transaction([
+          prisma.user.update({ where: { id: targetUserId }, data: gmailFields }),
+          prisma.account.create({
+            data: {
+              userId: targetUserId,
+              type: 'oauth',
+              provider: 'google',
+              providerAccountId,
+              ...accountTokenFields,
+            },
+          }),
+        ])
+      } else {
+        // Case 3: Brand-new user — create User + Account atomically
+        const newUser = await prisma.$transaction(async (tx) => {
+          const u = await tx.user.create({
+            data: {
+              email: gmailEmail,
+              name: (profileData.name as string | undefined) || gmailEmail.split('@')[0],
+              image: (profileData.picture as string | undefined) ?? null,
+              ...gmailFields,
+            },
+            select: { id: true },
+          })
+
+          await tx.account.create({
+            data: {
+              userId: u.id,
+              type: 'oauth',
+              provider: 'google',
+              providerAccountId,
+              ...accountTokenFields,
+            },
+          })
+
+          return u
+        })
+
+        targetUserId = newUser.id
+      }
     }
 
     const { rawToken } = await createUserSession({
-      userId: targetUser.id,
+      userId: targetUserId,
       request: req,
       sendNewDeviceAlert: false,
     })
