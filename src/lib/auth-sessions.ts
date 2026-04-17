@@ -21,6 +21,7 @@ export interface SessionUser {
   id: string
   email: string
   name: string
+  isAdmin: boolean
 }
 
 export interface SessionContext {
@@ -172,11 +173,12 @@ function isInactiveExpired(lastActiveAt: Date, now: Date) {
   return now.getTime() - lastActiveAt.getTime() >= SESSION_INACTIVITY_TIMEOUT_MS
 }
 
-function toSessionUser(user: { id: string; email: string; name: string | null }): SessionUser {
+function toSessionUser(user: { id: string; email: string; name: string | null; isAdmin: boolean }): SessionUser {
   return {
     id: user.id,
     email: user.email,
     name: user.name || 'User',
+    isAdmin: user.isAdmin,
   }
 }
 
@@ -334,7 +336,7 @@ async function handleSuspiciousLoginSignal() {
 }
 
 const SESSION_INCLUDE = {
-  user: { select: { id: true, email: true, name: true } },
+  user: { select: { id: true, email: true, name: true, isAdmin: true } },
 } as const satisfies Prisma.SessionInclude
 
 type SessionWithUser = Prisma.SessionGetPayload<{ include: typeof SESSION_INCLUDE }>
