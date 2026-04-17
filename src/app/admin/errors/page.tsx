@@ -27,11 +27,18 @@ export default function AdminErrorsPage() {
     if (!user) { router.replace('/auth/signin'); return }
     if (!user.isAdmin) { router.replace('/dashboard'); return }
 
-    setFetching(true)
-    fetch('/api/admin/errors')
-      .then((r) => r.json())
-      .then((json) => setLogs(json.data ?? []))
-      .finally(() => setFetching(false))
+    async function loadErrors() {
+      setFetching(true)
+      try {
+        const res = await fetch('/api/admin/errors')
+        const json = await res.json()
+        setLogs(json.data ?? [])
+      } finally {
+        setFetching(false)
+      }
+    }
+
+    loadErrors()
   }, [isLoading, user, router])
 
   if (isLoading || !user) return null
