@@ -1,5 +1,5 @@
 -- DropIndex
-DROP INDEX "MatterMemory_userId_idx";
+DROP INDEX IF EXISTS "MatterMemory_userId_idx";
 
 -- DropIndex
-DROP INDEX "MatterMemory_userId_topic_idx";
+DROP INDEX IF EXISTS "MatterMemory_userId_topic_idx";
