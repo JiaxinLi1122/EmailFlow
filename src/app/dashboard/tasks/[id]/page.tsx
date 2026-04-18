@@ -5,6 +5,9 @@ import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -18,7 +21,7 @@ import {
   X, Check, AlertTriangle, Shield, RotateCcw, Square, CheckSquare, Plus,
   UserRound, ChevronRight, FolderOpen, Pencil,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -179,12 +182,15 @@ export default function TaskDetailPage() {
   const [editImpact, setEditImpact] = useState(3)
   const [editNotes, setEditNotes] = useState('')
   const [editStatus, setEditStatus] = useState('pending')
+  const [actionCooldown, setActionCooldown] = useState(false)
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [unlinkingEmailId, setUnlinkingEmailId] = useState<string | null>(null)
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
   const [editingField, setEditingField] = useState<string | null>(null)
   const [showReassign, setShowReassign] = useState(false)
+  const [showChecklistCompleteDialog, setShowChecklistCompleteDialog] = useState(false)
+  const waitingItemIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (task) {
@@ -260,6 +266,8 @@ export default function TaskDetailPage() {
 
   const handleStatusChange = (newStatus: string) => {
     setEditStatus(newStatus)
+    setActionCooldown(true)
+    setTimeout(() => setActionCooldown(false), 1500)
     updateTask.mutate(
       { status: newStatus },
       {
@@ -287,7 +295,6 @@ export default function TaskDetailPage() {
     // 自动完成父任务：如果所有子任务都完成，父任务也标记为完成
     const item = next.find(i => i.id === id)
     if (item?.completed) {
-      // 向上查找所有父任务，逐级检查是否应该自动完成
       for (let i = next.length - 1; i >= 0; i--) {
         if (next[i].level < item.level) {
           const parent = next[i]
@@ -296,10 +303,26 @@ export default function TaskDetailPage() {
           }
         }
       }
+
+      // 如果刚勾选的是"waiting for reply"条目，直接完成 task
+      if (waitingItemIdRef.current && id === waitingItemIdRef.current) {
+        waitingItemIdRef.current = null
+        setChecklistItems(next)
+        autoSaveChecklist(next)
+        handleStatusChange('completed')
+        return
+      }
     }
 
     setChecklistItems(next)
     autoSaveChecklist(next)
+
+    // 所有条目都完成且 task 未完成 → 弹完成确认弹窗
+    const allDone = next.length > 0 && next.every(i => i.completed)
+    const taskNotDone = editStatus !== 'completed' && editStatus !== 'dismissed'
+    if (allDone && taskNotDone) {
+      setShowChecklistCompleteDialog(true)
+    }
   }
 
   const updateItemText = (id: string, text: string) => {
@@ -536,24 +559,6 @@ export default function TaskDetailPage() {
                 </InlineNotice>
               )}
 
-              {/* Quick actions for confirmed */}
-              {task.status === 'confirmed' && (
-                <InlineNotice variant="info">
-                  <div className="flex w-full items-center gap-3">
-                    <span className="min-w-0 flex-1 text-left">Task confirmed and ready to track. Mark it complete when the work is done.</span>
-                    <div className="ml-auto flex shrink-0 items-center gap-2">
-                      <Button size="sm" className="h-8 gap-1.5" onClick={() => handleStatusChange('completed')}>
-                        <Check className="h-3.5 w-3.5" />
-                        Complete
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => handleStatusChange('dismissed')}>
-                        <X className="h-3.5 w-3.5" />
-                        Dismiss
-                      </Button>
-                    </div>
-                  </div>
-                </InlineNotice>
-              )}
 
               {/* Quick actions for completed */}
               {task.status === 'completed' && (
@@ -621,7 +626,7 @@ export default function TaskDetailPage() {
                         handleSave()
                         setEditingField(null)
                       }}
-                      disabled={updateTask.isPending}
+                      disabled={updateTask.isPending || actionCooldown}
                       className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Save"
                     >
@@ -632,7 +637,7 @@ export default function TaskDetailPage() {
                         setEditTitle(task.title)
                         setEditingField(null)
                       }}
-                      disabled={updateTask.isPending}
+                      disabled={updateTask.isPending || actionCooldown}
                       className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Cancel"
                     >
@@ -665,7 +670,7 @@ export default function TaskDetailPage() {
                           handleSave()
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Save"
                       >
@@ -676,7 +681,7 @@ export default function TaskDetailPage() {
                           setEditSummary(task.summary)
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Cancel"
                       >
@@ -717,7 +722,7 @@ export default function TaskDetailPage() {
                           handleSave()
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Save"
                       >
@@ -728,7 +733,7 @@ export default function TaskDetailPage() {
                           setEditDeadline(task.deadline || '')
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Cancel"
                       >
@@ -768,7 +773,7 @@ export default function TaskDetailPage() {
                           handleSave()
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Save"
                       >
@@ -779,7 +784,7 @@ export default function TaskDetailPage() {
                           setEditUrgency(task.urgency || 3)
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Cancel"
                       >
@@ -819,7 +824,7 @@ export default function TaskDetailPage() {
                           handleSave()
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Save"
                       >
@@ -830,7 +835,7 @@ export default function TaskDetailPage() {
                           setEditImpact(task.impact || 3)
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Cancel"
                       >
@@ -872,7 +877,7 @@ export default function TaskDetailPage() {
                           handleSave()
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-blue-50 rounded transition-colors text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Save"
                       >
@@ -883,7 +888,7 @@ export default function TaskDetailPage() {
                           setEditNotes(task.userNotes || '')
                           setEditingField(null)
                         }}
-                        disabled={updateTask.isPending}
+                        disabled={updateTask.isPending || actionCooldown}
                         className="shrink-0 p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Cancel"
                       >
@@ -908,7 +913,7 @@ export default function TaskDetailPage() {
                     <button
                       key={value}
                       onClick={() => handleStatusChange(value)}
-                      disabled={updateTask.isPending}
+                      disabled={updateTask.isPending || actionCooldown}
                       className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         editStatus === value
                           ? `${opt.color} ring-2 ring-offset-1`
@@ -1259,6 +1264,46 @@ export default function TaskDetailPage() {
         </div>
         </div>
       </div>
+
+      <Dialog open={showChecklistCompleteDialog} onOpenChange={setShowChecklistCompleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>🎉 Checklist Complete!</DialogTitle>
+            <DialogDescription>
+              You've checked off all items. Do you want to mark this task as complete?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowChecklistCompleteDialog(false)
+                const waitingItem: ChecklistItem = {
+                  id: generateId(),
+                  text: 'Waiting for reply',
+                  level: 0,
+                  completed: false,
+                }
+                waitingItemIdRef.current = waitingItem.id
+                const next = [...checklistItems, waitingItem]
+                setChecklistItems(next)
+                autoSaveChecklist(next)
+                toast('Waiting for reply item added — check it off when ready.')
+              }}
+            >
+              No, waiting for reply
+            </Button>
+            <Button
+              onClick={() => {
+                setShowChecklistCompleteDialog(false)
+                handleStatusChange('completed')
+              }}
+            >
+              Yes, mark complete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

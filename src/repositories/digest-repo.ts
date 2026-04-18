@@ -11,11 +11,11 @@ export interface CreateDigestData {
   periodEnd: Date
   content: string
   stats: Record<string, number>
+  isPreview?: boolean
 }
 
 export async function createDigest(data: CreateDigestData) {
-  // Check for an existing digest for the same user + period + periodStart
-  // If one exists, update it instead of creating a duplicate
+  const isPreview = data.isPreview ?? false
   const existing = await prisma.digest.findFirst({
     where: { userId: data.userId, period: data.period, periodStart: data.periodStart },
   })
@@ -27,6 +27,7 @@ export async function createDigest(data: CreateDigestData) {
         content: data.content,
         stats: JSON.stringify(data.stats),
         periodEnd: data.periodEnd,
+        isPreview,
       },
     })
   }
@@ -39,6 +40,7 @@ export async function createDigest(data: CreateDigestData) {
       periodEnd: data.periodEnd,
       content: data.content,
       stats: JSON.stringify(data.stats),
+      isPreview,
     },
   })
 }

@@ -41,6 +41,7 @@ type DigestRecord = {
   createdAt: string
   content: string
   stats: string | DigestStats | null
+  isPreview?: boolean
 }
 
 export default function DigestPage() {
@@ -294,6 +295,11 @@ function DigestCard({ digest, isLatest }: { digest: DigestRecord; isLatest: bool
             {isLatest ? (
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
                 Latest
+              </span>
+            ) : null}
+            {digest.isPreview ? (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                This week so far
               </span>
             ) : null}
           </div>

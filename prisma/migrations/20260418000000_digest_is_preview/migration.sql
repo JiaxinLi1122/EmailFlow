@@ -1,0 +1,1 @@
+ALTER TABLE "Digest" ADD COLUMN "isPreview" BOOLEAN NOT NULL DEFAULT false;

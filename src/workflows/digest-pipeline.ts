@@ -73,7 +73,7 @@ function buildDailyContent({
   }
 
   if (!action.length && !awareness.length && !uncertain.length && !ignored.length) {
-    lines.push('No emails processed in this period.', '')
+    lines.push('No activity yet today.', '')
   }
 
   lines.push('---', '')
@@ -168,14 +168,11 @@ function buildWeeklyContent({
 
 // ── Period helpers ───────────────────────────────────────────
 
-function yesterdayRange() {
+function todayRange() {
   const now = new Date()
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
-  start.setDate(start.getDate() - 1)
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
-  return { start, end }
+  return { start, end: now }
 }
 
 function lastNDaysRange(n: number) {
@@ -187,10 +184,20 @@ function lastNDaysRange(n: number) {
   return { start, end }
 }
 
+function thisWeekSoFarRange() {
+  const now = new Date()
+  const start = new Date(now)
+  const day = start.getDay() // 0=Sun,1=Mon,...,6=Sat
+  const daysSinceMonday = day === 0 ? 6 : day - 1
+  start.setDate(start.getDate() - daysSinceMonday)
+  start.setHours(0, 0, 0, 0)
+  return { start, end: now }
+}
+
 // ── Public API ───────────────────────────────────────────────
 
 export async function createDailyDigest(userId: string) {
-  const { start, end } = yesterdayRange()
+  const { start, end } = todayRange()
 
   const [action, awareness, uncertain, ignored, tasks] = await Promise.all([
     emailRepo.findEmailsByClassification(userId, 'action', { start, end }),
@@ -228,14 +235,16 @@ export async function createDailyDigest(userId: string) {
 }
 
 export async function createWeeklyDigest(userId: string) {
-  const { start, end } = lastNDaysRange(7)
+  const { start, end } = thisWeekSoFarRange()
 
-  // Fetch each day's emails separately for the breakdown
+  // Fetch each day's emails separately — Mon through today only
   const days: Date[] = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(start)
-    d.setDate(d.getDate() + i)
-    days.push(d)
+  const cursor = new Date(start)
+  const todayEnd = new Date(end)
+  todayEnd.setHours(23, 59, 59, 999)
+  while (cursor <= todayEnd) {
+    days.push(new Date(cursor))
+    cursor.setDate(cursor.getDate() + 1)
   }
 
   const byDay = await Promise.all(
@@ -285,5 +294,6 @@ export async function createWeeklyDigest(userId: string) {
     periodEnd: end,
     content,
     stats,
+    isPreview: true,
   })
 }
