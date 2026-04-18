@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { format } from 'date-fns'
@@ -93,6 +94,8 @@ const informationalPriority: Record<string, number> = {
 }
 
 export default function EmailsPage() {
+  const searchParams = useSearchParams()
+  const focusIdentityId = searchParams.get('identity') ?? undefined
   const [tab, setTab] = useState<Tab>('actionable')
   const [classification, setClassification] = useState('all')
   const [accountFilter, setAccountFilter] = useState('all')
@@ -542,7 +545,7 @@ export default function EmailsPage() {
           description={searchQuery ? 'Try adjusting your keywords or filters.' : 'Change the current filters to see more mail.'}
         />
       ) : (
-        <EmailMatterView emails={filtered} />
+        <EmailMatterView emails={filtered} focusIdentityId={focusIdentityId} />
       )}
 
       {/* Pagination */}
@@ -649,25 +652,30 @@ function SyncBatchModal({
 type EmailProjectGroup = { id: string; name: string; items: EmailItem[] }
 type EmailIdentityGroup = { id: string; name: string; projects: EmailProjectGroup[] }
 
-function EmailMatterView({ emails }: { emails: EmailItem[] }) {
+function EmailMatterView({ emails, focusIdentityId }: { emails: EmailItem[]; focusIdentityId?: string }) {
   const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const [userHasToggled, setUserHasToggled] = useState(false)
 
-  const toggleIdentity = (id: string) =>
+  const toggleIdentity = (id: string) => {
+    setUserHasToggled(true)
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+  }
 
-  const toggleProject = (id: string) =>
+  const toggleProject = (id: string) => {
+    setUserHasToggled(true)
     setCollapsedProjects((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+  }
 
   const { identityGroups, ungrouped } = useMemo(() => {
     const ungrouped: EmailItem[] = []
@@ -718,7 +726,9 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
   return (
     <div className="space-y-2">
       {identityGroups.map((identity) => {
-        const isIdentityCollapsed = collapsedIdentities.has(identity.id)
+        const isIdentityCollapsed = !userHasToggled && focusIdentityId
+          ? identity.id !== focusIdentityId
+          : collapsedIdentities.has(identity.id)
         const totalCount = identity.projects.reduce((s, p) => s + p.items.length, 0)
         const totalAttention = identity.projects.reduce((s, p) => s + attentionCount(p.items), 0)
         return (
@@ -736,7 +746,7 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
                   {totalAttention} need action
                 </span>
               )}
-              <span className="ml-auto text-xs text-slate-400">{totalCount} email{totalCount !== 1 ? 's' : ''}</span>
+              <span className="ml-auto text-xs text-slate-400">{totalCount} email{totalCount !== 1 ? 's' : ''} shown</span>
             </button>
 
             {!isIdentityCollapsed && (
@@ -759,7 +769,7 @@ function EmailMatterView({ emails }: { emails: EmailItem[] }) {
                             {projectAttention}
                           </span>
                         )}
-                        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length}</span>
+                        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length} shown</span>
                       </button>
 
                       {!isProjectCollapsed && (

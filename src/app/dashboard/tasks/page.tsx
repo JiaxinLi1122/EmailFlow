@@ -29,7 +29,7 @@ import {
   ChevronDown, UserRound,
 } from 'lucide-react'
 import { useState, useMemo, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
@@ -101,6 +101,8 @@ const STATUS_OPTIONS = [
 
 export default function TasksPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const focusProjectId = searchParams.get('project') ?? undefined
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('priority')
   const [viewMode, setViewMode] = useState<ViewMode>('list')
@@ -246,7 +248,7 @@ export default function TasksPage() {
             description="Try a different filter or create a task manually."
           />
         ) : viewMode === 'list' ? (
-          <TaskListView tasks={tasks} updateTask={updateTask} />
+          <TaskListView tasks={tasks} updateTask={updateTask} focusProjectId={focusProjectId} />
         ) : viewMode === 'timeline' ? (
           <GanttTimeline tasks={tasks} updateTask={updateTask} />
         ) : (
@@ -315,28 +317,33 @@ export default function TasksPage() {
 }
 
 /* ========== LIST VIEW - 2-level collapsible: identity -> project ========== */
-function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: MutationLike }) {
+function TaskListView({ tasks, updateTask, focusProjectId }: { tasks: TaskItem[]; updateTask: MutationLike; focusProjectId?: string }) {
   type ProjectGroup = { id: string; name: string; items: TaskItem[] }
   type IdentityGroup = { id: string; name: string; projects: ProjectGroup[] }
 
   const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const [userHasToggled, setUserHasToggled] = useState(false)
 
-  const toggleIdentity = (id: string) =>
+  const toggleIdentity = (id: string) => {
+    setUserHasToggled(true)
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+  }
 
-  const toggleProject = (id: string) =>
+  const toggleProject = (id: string) => {
+    setUserHasToggled(true)
     setCollapsedProjects((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+  }
 
   const sortItemsWithinGroup = useCallback((items: TaskItem[]) => {
     const active = items.filter((task) => task.status !== 'completed' && task.status !== 'dismissed')
@@ -390,7 +397,9 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
   return (
     <div className="space-y-2">
       {identityGroups.map((identity) => {
-        const isIdentityCollapsed = collapsedIdentities.has(identity.id)
+        const isIdentityCollapsed = !userHasToggled && focusProjectId
+          ? !identity.projects.some((p) => p.id === focusProjectId)
+          : collapsedIdentities.has(identity.id)
         const totalCount = identity.projects.reduce((s, p) => s + p.items.length, 0)
         return (
           <div key={identity.id} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
@@ -402,13 +411,15 @@ function TaskListView({ tasks, updateTask }: { tasks: TaskItem[]; updateTask: Mu
               <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${isIdentityCollapsed ? '-rotate-90' : ''}`} />
               <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">{identity.name}</span>
-              <span className="ml-auto text-xs text-slate-400">{totalCount} task{totalCount !== 1 ? 's' : ''}</span>
+              <span className="ml-auto text-xs text-slate-400">{totalCount} task{totalCount !== 1 ? 's' : ''} shown</span>
             </button>
 
             {!isIdentityCollapsed && (
               <div className="divide-y divide-slate-100 border-t border-slate-100">
                 {identity.projects.map((project) => {
-                  const isProjectCollapsed = collapsedProjects.has(project.id)
+                  const isProjectCollapsed = !userHasToggled && focusProjectId
+                    ? project.id !== focusProjectId
+                    : collapsedProjects.has(project.id)
                   return (
                     <div key={project.id}>
                       {/* Project row */}

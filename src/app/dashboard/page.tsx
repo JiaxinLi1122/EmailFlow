@@ -51,6 +51,7 @@ type DashboardEmail = {
 type DashboardMatter = {
   id: string
   title: string
+  status: string
   lastMessageAt?: string | null
   project?: {
     id: string
@@ -184,11 +185,12 @@ export default function DashboardPage() {
   const actionToTask = emailData.action > 0 ? Math.round((totalTasks / emailData.action) * 100) : 0
 
   const activeIdentities = useMemo(() => {
-    const counts = new Map<string, { name: string; count: number }>()
+    const counts = new Map<string, { id: string; name: string; count: number }>()
     for (const matter of matters) {
+      if (matter.status === 'completed') continue
       const identity = matter.project?.identity
       if (!identity) continue
-      const current = counts.get(identity.id) ?? { name: identity.name, count: 0 }
+      const current = counts.get(identity.id) ?? { id: identity.id, name: identity.name, count: 0 }
       current.count += 1
       counts.set(identity.id, current)
     }
@@ -198,6 +200,7 @@ export default function DashboardPage() {
   const activeProjects = useMemo(() => {
     const counts = new Map<string, { id: string; name: string; count: number; lastActivity: number }>()
     for (const matter of matters) {
+      if (matter.status === 'completed') continue
       const project = matter.project
       if (!project) continue
       const existing = counts.get(project.id) ?? {
@@ -413,8 +416,9 @@ export default function DashboardPage() {
                   ) : (
                     <div className="space-y-2">
                       {activeIdentities.map((identity) => (
-                        <div
-                          key={identity.name}
+                        <Link
+                          key={identity.id}
+                          href={`/dashboard/emails?identity=${identity.id}`}
                           className="flex items-center justify-between rounded-xl border border-sky-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-sky-50/70"
                         >
                           <div>
@@ -422,9 +426,9 @@ export default function DashboardPage() {
                             <p className="text-xs text-slate-500">Role context inferred from recent matter activity</p>
                           </div>
                           <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-100">
-                            {identity.count} matters
+                            {identity.count} active matter{identity.count !== 1 ? 's' : ''}
                           </span>
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   )}
@@ -448,7 +452,7 @@ export default function DashboardPage() {
                       {activeProjects.map((project) => (
                         <Link
                           key={project.id}
-                          href="/dashboard/tasks"
+                          href={`/dashboard/tasks?project=${project.id}`}
                           className="flex items-center justify-between rounded-xl border border-violet-100/80 bg-white/80 px-3 py-3 shadow-sm transition-colors hover:bg-violet-50/70 hover:text-violet-700"
                         >
                           <div>
@@ -456,7 +460,7 @@ export default function DashboardPage() {
                             <p className="text-xs text-slate-500">Recently active grouped project context</p>
                           </div>
                           <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-violet-700 ring-1 ring-violet-100">
-                            {project.count} matters
+                            {project.count} active matter{project.count !== 1 ? 's' : ''}
                           </span>
                         </Link>
                       ))}
