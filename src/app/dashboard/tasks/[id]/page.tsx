@@ -1270,7 +1270,7 @@ export default function TaskDetailPage() {
           <DialogHeader>
             <DialogTitle>🎉 Checklist Complete!</DialogTitle>
             <DialogDescription>
-              You've checked off all items. Do you want to mark this task as complete?
+              You&apos;ve checked off all items. Do you want to mark this task as complete?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
