@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import jwt from 'jsonwebtoken'
 import { createToken, verifyToken, COOKIE_NAME } from '../auth-token'
 
 // Only testing createToken / verifyToken — pure JWT logic, no Next.js deps.
@@ -24,8 +25,6 @@ describe('createToken / verifyToken', () => {
   })
 
   it('returns null for a token signed with a different secret', () => {
-    // jwt.sign with a different secret produces a valid-looking but unverifiable token
-    const jwt = require('jsonwebtoken')
     const token = jwt.sign({ userId: 'u1' }, 'wrong-secret')
     expect(verifyToken(token)).toBeNull()
   })
