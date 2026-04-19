@@ -8,6 +8,18 @@ export async function POST() {
   try {
     const user = await requireCurrentUser()
 
+    const fullUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { passwordHash: true },
+    })
+
+    if (!fullUser?.passwordHash) {
+      return NextResponse.json(
+        { success: false, error: 'Please set a password before disconnecting Google' },
+        { status: 400 }
+      )
+    }
+
     await Promise.all([
       gmailProvider.disconnect(user.id),
       prisma.account.deleteMany({ where: { userId: user.id, provider: 'google' } }),
