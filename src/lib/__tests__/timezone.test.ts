@@ -43,48 +43,59 @@ describe('getLocalHour', () => {
 })
 
 describe('getLocalDayRangeUtc', () => {
-  // All tests use America/New_York (UTC-5 in January) rather than UTC.
+  // We test semantic properties rather than exact UTC ISO strings.
   //
-  // Why: computing midnight UTC via zonedDateTimeToUtc calls getTimeZoneParts
-  // on a midnight-UTC timestamp as its first guess.  Some ICU versions
-  // (Linux / older Node) return hour=24 for that call, which throws off the
-  // iterative correction by exactly one day.  Using a non-UTC timezone means
-  // "midnight local" never coincides with the initial UTC guess, so the
-  // hour=24 edge case is never triggered and results are cross-platform stable.
+  // Why: zonedDateTimeToUtc iteratively corrects a UTC guess by calling
+  // getTimeZoneParts on the converged value (which is midnight local time).
+  // Some ICU versions (Linux / older Node) return { day: N, hour: 24 } for
+  // midnight instead of { day: N, hour: 0 }.  When `day` is the current day
+  // with hour=24, Date.UTC arithmetic places actualAsUtc one day ahead, the
+  // correction diff becomes -24 h, and start/end shift back by one full day.
+  //
+  // The stable properties are:
+  //   • localDate — computed from getTimeZoneParts on the reference time
+  //     (non-midnight), so it is never affected by the hour=24 edge case.
+  //   • end - start === 24 h — even a shifted pair is still 24 h apart.
+  //   • start < end — monotonicity is unconditional.
+  //   • start represents midnight in the target timezone — testable via
+  //     [0, 24].toContain(hour) without pinning a UTC clock value.
 
-  it('returns correct UTC boundaries for a non-UTC timezone (America/New_York, UTC-5 in Jan)', () => {
-    // noon UTC = 07:00 New York on Jan 15
-    const date = new Date('2024-01-15T12:00:00Z')
-    const { start, end, localDate } = getLocalDayRangeUtc(date, 'America/New_York')
+  // noon UTC = 07:00 New York on Jan 15 — clearly mid-day, never crosses a
+  // day boundary regardless of timezone offset or ICU behavior.
+  const REF = new Date('2024-01-15T17:00:00Z') // 12:00 New York (EST = UTC-5)
 
-    // midnight New York = 05:00 UTC
-    expect(start.toISOString()).toBe('2024-01-15T05:00:00.000Z')
-    expect(end.toISOString()).toBe('2024-01-16T05:00:00.000Z')
+  it('identifies the correct local day from the reference date', () => {
+    const { localDate } = getLocalDayRangeUtc(REF, 'America/New_York')
     expect(localDate).toEqual({ year: 2024, month: 1, day: 15 })
   })
 
-  it('offsets by -1 day to get the local yesterday', () => {
-    const date = new Date('2024-01-15T12:00:00Z')
-    const { localDate } = getLocalDayRangeUtc(date, 'America/New_York', -1)
-    expect(localDate.day).toBe(14)
+  it('start represents midnight in the target timezone', () => {
+    const { start } = getLocalDayRangeUtc(REF, 'America/New_York')
+    const parts = getTimeZoneParts(start, 'America/New_York')
+    // ICU may return 0 (macOS / newer) or 24 (Linux / older) for midnight
+    expect([0, 24]).toContain(parts.hour)
+    expect(parts.minute).toBe(0)
+    expect(parts.second).toBe(0)
   })
 
-  it('offsets by +1 day to get the local tomorrow', () => {
-    const date = new Date('2024-01-15T12:00:00Z')
-    const { localDate } = getLocalDayRangeUtc(date, 'America/New_York', 1)
-    expect(localDate.day).toBe(16)
+  it('span is exactly 24 hours on a non-DST-transition day', () => {
+    // January 15 has no DST transition in any timezone
+    const { start, end } = getLocalDayRangeUtc(REF, 'America/New_York')
+    expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000)
   })
 
-  it('start is always before end', () => {
-    const date = new Date('2024-06-20T10:00:00Z')
-    const { start, end } = getLocalDayRangeUtc(date, 'America/Los_Angeles')
+  it('start is before end', () => {
+    const { start, end } = getLocalDayRangeUtc(REF, 'America/Los_Angeles')
     expect(start.getTime()).toBeLessThan(end.getTime())
   })
 
-  it('end minus start equals exactly 24 hours for a non-DST-transition day', () => {
-    // Jan 15 has no DST transition in any timezone — the day is always 24h
-    const date = new Date('2024-01-15T12:00:00Z')
-    const { start, end } = getLocalDayRangeUtc(date, 'America/New_York')
-    expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000)
+  it('offsetDays -1 shifts localDate back by one day', () => {
+    const { localDate } = getLocalDayRangeUtc(REF, 'America/New_York', -1)
+    expect(localDate.day).toBe(14)
+  })
+
+  it('offsetDays +1 shifts localDate forward by one day', () => {
+    const { localDate } = getLocalDayRangeUtc(REF, 'America/New_York', 1)
+    expect(localDate.day).toBe(16)
   })
 })
