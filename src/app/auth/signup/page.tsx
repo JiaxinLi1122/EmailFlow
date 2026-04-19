@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
@@ -12,9 +12,31 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 
+const GMAIL_ERROR_MESSAGES: Record<string, string> = {
+  no_email: 'Your Google account must have an email address.',
+  no_provider_id: 'Google sign-in failed: missing account identifier.',
+  token_exchange_failed: 'Google sign-in failed. Please try again.',
+  userinfo_failed: 'Could not retrieve your Google account info. Please try again.',
+  missing_access_token: 'Google sign-in failed. Please try again.',
+  missing_code: 'Google sign-in was cancelled or incomplete.',
+  missing_google_env: 'Google sign-in is not configured on this server.',
+  server_error: 'An unexpected error occurred. Please try again.',
+}
+
+function GmailErrorReader({ onError }: { onError: (msg: string) => void }) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  useEffect(() => {
+    const gmailError = searchParams.get('gmail_error')
+    if (!gmailError) return
+    onError(GMAIL_ERROR_MESSAGES[gmailError] ?? 'Google sign-in failed. Please try again.')
+    router.replace('/auth/signup', { scroll: false })
+  }, [searchParams, router, onError])
+  return null
+}
+
 export default function SignUpPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<1 | 2>(1)
@@ -28,23 +50,6 @@ export default function SignUpPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null)
-
-  useEffect(() => {
-    const gmailError = searchParams.get('gmail_error')
-    if (!gmailError) return
-    const messages: Record<string, string> = {
-      no_email: 'Your Google account must have an email address.',
-      no_provider_id: 'Google sign-in failed: missing account identifier.',
-      token_exchange_failed: 'Google sign-in failed. Please try again.',
-      userinfo_failed: 'Could not retrieve your Google account info. Please try again.',
-      missing_access_token: 'Google sign-in failed. Please try again.',
-      missing_code: 'Google sign-in was cancelled or incomplete.',
-      missing_google_env: 'Google sign-in is not configured on this server.',
-      server_error: 'An unexpected error occurred. Please try again.',
-    }
-    setError(messages[gmailError] ?? 'Google sign-in failed. Please try again.')
-    router.replace('/auth/signup', { scroll: false })
-  }, [searchParams, router])
 
   const passwordsDoNotMatch = confirmPassword.length > 0 && password !== confirmPassword
 
@@ -93,6 +98,9 @@ export default function SignUpPage() {
 
   return (
     <>
+      <Suspense fallback={null}>
+        <GmailErrorReader onError={setError} />
+      </Suspense>
       <Dialog open={legalModal !== null} onOpenChange={(open) => { if (!open) setLegalModal(null) }}>
         <DialogContent
           showCloseButton={false}
