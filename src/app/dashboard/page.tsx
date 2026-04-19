@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -28,6 +28,7 @@ import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { getEmailClassConfig } from '@/lib/email-classification'
 import { useAuth } from '@/lib/use-auth'
 import { CACHE_TIME } from '@/lib/query-cache'
+import { toast } from 'sonner'
 
 type DashboardTask = {
   id: string
@@ -69,6 +70,23 @@ export default function DashboardPage() {
   const searchParams = useSearchParams()
   const [showSyncModal, setShowSyncModal] = useState(() => searchParams.get('gmail_connected') === '1')
   const [syncSetupLoading, setSyncSetupLoading] = useState<number | null>(null)
+
+  useEffect(() => {
+    const gmailError = searchParams.get('gmail_error')
+    if (!gmailError) return
+    const messages: Record<string, string> = {
+      google_account_already_bound: 'This Google account is already linked to another user.',
+      token_exchange_failed: 'Google sign-in failed. Please try again.',
+      userinfo_failed: 'Could not retrieve your Google account info. Please try again.',
+      missing_access_token: 'Google sign-in failed. Please try again.',
+      missing_code: 'Google sign-in was cancelled or incomplete.',
+      missing_google_env: 'Google sign-in is not configured on this server.',
+      no_provider_id: 'Google sign-in failed: missing account identifier.',
+      server_error: 'An unexpected error occurred. Please try again.',
+    }
+    toast.error(messages[gmailError] ?? 'Google sign-in failed. Please try again.')
+    router.replace('/dashboard', { scroll: false })
+  }, [searchParams, router])
 
   const handleSyncSetup = useCallback(async (days: number) => {
     setSyncSetupLoading(days)

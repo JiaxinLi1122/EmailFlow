@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { ArrowLeft, Eye, EyeOff, Loader2, X } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 
 export default function SignUpPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<1 | 2>(1)
@@ -27,6 +28,23 @@ export default function SignUpPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null)
+
+  useEffect(() => {
+    const gmailError = searchParams.get('gmail_error')
+    if (!gmailError) return
+    const messages: Record<string, string> = {
+      no_email: 'Your Google account must have an email address.',
+      no_provider_id: 'Google sign-in failed: missing account identifier.',
+      token_exchange_failed: 'Google sign-in failed. Please try again.',
+      userinfo_failed: 'Could not retrieve your Google account info. Please try again.',
+      missing_access_token: 'Google sign-in failed. Please try again.',
+      missing_code: 'Google sign-in was cancelled or incomplete.',
+      missing_google_env: 'Google sign-in is not configured on this server.',
+      server_error: 'An unexpected error occurred. Please try again.',
+    }
+    setError(messages[gmailError] ?? 'Google sign-in failed. Please try again.')
+    router.replace('/auth/signup', { scroll: false })
+  }, [searchParams, router])
 
   const passwordsDoNotMatch = confirmPassword.length > 0 && password !== confirmPassword
 
