@@ -7,74 +7,52 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RetentionStatus {
-  ACTIVE
-  ARCHIVED
-  METADATA_ONLY
-  PURGED
-}
-
-enum ProtectionRuleType {
-  CONTACT  // specific sender email address
-  DOMAIN   // sender email domain (e.g. acme.com)
-  LABEL    // Gmail label name (e.g. STARRED, IMPORTANT)
-}
-
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String?
-  image        String?
-  passwordHash String?
-  timezone     String    @default("UTC")
-
-  totpEnabled Boolean @default(false)
-  totpSecret  String?
-
-  gmailEmail        String?
-  gmailAccessToken  String?
-  gmailRefreshToken String?
-  gmailTokenExpiry  DateTime?
-  gmailConnected    Boolean   @default(false)
-  emailProviderReauthRequired Boolean @default(false)
+  id                          String               @id @default(cuid())
+  email                       String               @unique
+  name                        String?
+  image                       String?
+  passwordHash                String?
+  timezone                    String               @default("UTC")
+  gmailAccessToken            String?
+  gmailRefreshToken           String?
+  gmailTokenExpiry            DateTime?
+  gmailConnected              Boolean              @default(false)
+  lastSyncAt                  DateTime?
+  syncEnabled                 Boolean              @default(true)
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  totpEnabled                 Boolean              @default(false)
+  totpSecret                  String?
+  gmailEmail                  String?
+  syncStartDate               DateTime?
+  emailProviderReauthRequired Boolean              @default(false)
   emailProviderReauthReason   String?
   emailProviderReauthAt       DateTime?
   emailProviderReauthProvider String?
-
-  syncStartDate DateTime?
-  lastSyncAt  DateTime?
-  syncEnabled Boolean   @default(true)
-
-  isAdmin   Boolean  @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  emails  Email[]
-  tasks   Task[]
-  digests Digest[]
-  identities UserIdentity[]
-  projects   ProjectContext[]
-
-  accounts             Account[]
-  sessions             Session[]
-  passwordResetTokens  PasswordResetToken[]
-  failedEmailSyncs     FailedEmailSync[]
-  stepUpChallenges     StepUpChallenge[]
-  stepUpTokens         StepUpToken[]
-
-  retentionPolicy  RetentionPolicy?
-  protectionRules  ProtectionRule[]
-  retentionJobLogs RetentionJobLog[]
+  isAdmin                     Boolean              @default(false)
+  accounts                    Account[]
+  digests                     Digest[]
+  emails                      Email[]
+  failedEmailSyncs            FailedEmailSync[]
+  passwordResetTokens         PasswordResetToken[]
+  projects                    ProjectContext[]
+  protectionRules             ProtectionRule[]
+  retentionJobLogs            RetentionJobLog[]
+  retentionPolicy             RetentionPolicy?
+  sessions                    Session[]
+  stepUpChallenges            StepUpChallenge[]
+  stepUpTokens                StepUpToken[]
+  tasks                       Task[]
+  identities                  UserIdentity[]
 }
 
 model Account {
-  id                String  @id @default(cuid())
+  id                String   @id @default(cuid())
   userId            String
   type              String
   provider          String
   providerAccountId String
-  email             String?
   refresh_token     String?
   access_token      String?
   expires_at        Int?
@@ -82,41 +60,36 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  email             String?
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  userId       String
-  tokenHash    String   @unique
-  deviceName   String   @default("Unknown device")
-  deviceType   String   @default("unknown")
-  browser      String   @default("Unknown")
-  os           String   @default("Unknown")
-  ipAddress    String   @default("")
-  userAgent    String   @default("")
+  id                String    @id @default(cuid())
+  userId            String
+  tokenHash         String    @unique
+  deviceName        String    @default("Unknown device")
+  deviceType        String    @default("unknown")
+  browser           String    @default("Unknown")
+  os                String    @default("Unknown")
+  ipAddress         String    @default("")
+  userAgent         String    @default("")
+  lastActiveAt      DateTime  @default(now())
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  status            String    @default("active")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
   deviceFingerprint String?
-  isNewDevice  Boolean  @default(false)
-  remember      Boolean @default(false)
-  lastActiveAt DateTime @default(now())
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  status       String   @default("active")
-
-  // Token rotation fields
-  previousTokenHash String?   // SHA-256 of the prior token, kept for replay detection
-  rotatedAt         DateTime? // When the last token rotation happened
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isNewDevice       Boolean   @default(false)
+  previousTokenHash String?
+  rotatedAt         DateTime?
+  remember          Boolean   @default(false)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, lastActiveAt(sort: Desc)])
   @@index([userId, expiresAt])
@@ -124,47 +97,36 @@ model Session {
 }
 
 model Email {
-  id             String   @id @default(cuid())
-  userId         String
-  gmailMessageId String   @unique
-  threadId       String?
-  accountEmail   String   @default("") // which email account received this
-  subject        String
-  sender         String
-  recipients     String   @default("") // JSON string for SQLite
-  bodyPreview    String
-  bodyFull       String?
-  receivedAt     DateTime
-  labels         String   @default("") // JSON string for SQLite
-  hasAttachments Boolean  @default(false)
-
-  classification  String?
-  classConfidence Float?
-  classReasoning  String?
-  isWorkRelated   Boolean?
-
-  // Set on store to group all emails from a single sync run together.
-  // Null for emails stored before this field was introduced.
-  syncBatchId String?
-
-  // Processing pipeline status — set to 'pending' on store, updated after AI runs.
-  // Default 'done' preserves correctness for rows created before this field existed.
-  processingStatus String @default("done") // pending | done | failed
-
-  processedAt DateTime?
-  createdAt   DateTime  @default(now())
-
-  // Retention fields — all nullable / defaulted so existing rows are unaffected
-  retentionStatus RetentionStatus @default(ACTIVE)
-  archivedAt      DateTime?
-  metadataOnlyAt  DateTime?
-  purgedAt        DateTime?
-  restorableUntil DateTime?  // deadline for restoring from METADATA_ONLY
-  retentionReason String?    // audit trail: why this status was applied
-
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  taskLinks   TaskEmail[]
-  attachments Attachment[]
+  id               String          @id @default(cuid())
+  userId           String
+  gmailMessageId   String          @unique
+  threadId         String?
+  accountEmail     String          @default("")
+  subject          String
+  sender           String
+  recipients       String          @default("")
+  bodyPreview      String
+  bodyFull         String?
+  receivedAt       DateTime
+  labels           String          @default("")
+  hasAttachments   Boolean         @default(false)
+  classification   String?
+  classConfidence  Float?
+  classReasoning   String?
+  isWorkRelated    Boolean?
+  processedAt      DateTime?
+  createdAt        DateTime        @default(now())
+  retentionStatus  RetentionStatus @default(ACTIVE)
+  archivedAt       DateTime?
+  metadataOnlyAt   DateTime?
+  purgedAt         DateTime?
+  restorableUntil  DateTime?
+  retentionReason  String?
+  processingStatus String          @default("done")
+  syncBatchId      String?
+  attachments      Attachment[]
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskLinks        TaskEmail[]
 
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, classification, receivedAt(sort: Desc)])
@@ -174,37 +136,32 @@ model Email {
 }
 
 model Task {
-  id          String  @id @default(cuid())
-  userId      String
-  title       String
-  summary     String
-  actionItems String  @default("") // JSON string for SQLite
-  status      String  @default("pending")
-  source      String  @default("manual") // manual | ai_auto
-
-  urgency        Int?
-  impact         Int?
-  priorityScore  Int?
-  priorityReason String?
-
+  id                 String      @id @default(cuid())
+  userId             String
+  title              String
+  summary            String
+  actionItems        String      @default("")
+  status             String      @default("pending")
+  urgency            Int?
+  impact             Int?
+  priorityScore      Int?
+  priorityReason     String?
   startDate          DateTime?
   explicitDeadline   DateTime?
   inferredDeadline   DateTime?
   deadlineConfidence Float?
   userSetDeadline    DateTime?
-
-  isUserEdited       Boolean @default(false)
+  isUserEdited       Boolean     @default(false)
   userNotes          String?
-  checkedActionItems String  @default("[]") // JSON array of checked indices
+  checkedActionItems String      @default("[]")
   confirmedAt        DateTime?
   dismissedAt        DateTime?
   completedAt        DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailLinks TaskEmail[]
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  source             String      @default("manual")
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailLinks         TaskEmail[]
 }
 
 model TaskEmail {
@@ -212,9 +169,8 @@ model TaskEmail {
   taskId       String
   emailId      String
   relationship String @default("source")
-
-  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  email        Email  @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  task         Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, emailId])
 }
@@ -226,135 +182,120 @@ model Digest {
   periodStart DateTime
   periodEnd   DateTime
   content     String
-  stats       String   @default("{}") // JSON string for SQLite
-  isPreview   Boolean  @default(false)
+  stats       String   @default("{}")
   createdAt   DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPreview   Boolean  @default(false)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model PasswordResetToken {
-  id         String    @id @default(cuid())
-  userId     String
-  tokenHash  String    @unique  // SHA-256 of the plaintext token sent via email
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime  @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// Stores a time-limited email OTP sent for step-up auth (email method only)
-model StepUpChallenge {
   id        String    @id @default(cuid())
   userId    String
-  otpHash   String    @unique  // SHA-256 of the 6-digit OTP sent via email
-  action    String             // 'change_password' | 'disable_totp' | 'delete_account'
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+model StepUpChallenge {
+  id        String    @id @default(cuid())
+  userId    String
+  otpHash   String    @unique
+  action    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, action])
 }
 
-// Short-lived single-use authorization token issued after step-up verification succeeds
 model StepUpToken {
   id        String    @id @default(cuid())
   userId    String
-  tokenHash String    @unique  // SHA-256 of the raw token returned to client
-  action    String             // must match the action on the guarded endpoint
+  tokenHash String    @unique
+  action    String
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, action])
 }
 
 model SenderMemory {
-  id        String   @id @default(cuid())
-  userId    String
-  sender    String
-
-  actionCount     Int @default(0)
-  awarenessCount  Int @default(0)
-  ignoreCount     Int @default(0)
-
-  lastUpdated     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  userId         String
+  sender         String
+  actionCount    Int      @default(0)
+  awarenessCount Int      @default(0)
+  ignoreCount    Int      @default(0)
+  lastUpdated    DateTime @updatedAt
 
   @@unique([userId, sender])
 }
 
 model MatterMemory {
-  id     String @id @default(cuid())
-  userId String
-  projectContextId String?
-
-  title      String // cleaned, specific matter title
-  topic      String @default("other") // meeting | invoice | project_update | support | application | approval | deadline | other
-  summary    String // one-sentence current state of this matter
-  status     String @default("open") // open | pending | waiting_reply | completed
-  nextAction String? // most important next step across all threads in this matter
-
-  linkedPrimaryTaskId String? // the primary task representing this matter
-  lastEmailId         String? // most recently processed email id
+  id                  String          @id @default(cuid())
+  userId              String
+  title               String
+  topic               String          @default("other")
+  summary             String
+  status              String          @default("open")
+  nextAction          String?
+  linkedPrimaryTaskId String?
+  lastEmailId         String?
   lastMessageAt       DateTime?
-  threadCount         Int @default(0) // how many threads are grouped here
-  emailCount          Int @default(0) // total emails processed across all threads
-
-  lastClassification String? // classification of most recent email
-  participants       Json    @default("[]") // JSON array of unique senders seen across all threads
-  keywords           Json    @default("[]") // JSON array of key terms for rule-based matching
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  projectContext ProjectContext? @relation(fields: [projectContextId], references: [id])
-  threads ThreadMemory[] // threads that belong to this matter
+  threadCount         Int             @default(0)
+  emailCount          Int             @default(0)
+  lastClassification  String?
+  participants        Json            @default("[]")
+  keywords            Json            @default("[]")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  projectContextId    String?
+  projectContext      ProjectContext? @relation(fields: [projectContextId], references: [id])
+  threads             ThreadMemory[]
 }
 
 model UserIdentity {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
   userId      String
   name        String
   description String?
-  status      String   @default("active")
-  keywords    Json     @default("[]")
-  hints       Json     @default("[]")
-  confidence  Float    @default(1.0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status      String           @default("active")
+  keywords    Json             @default("[]")
+  hints       Json             @default("[]")
+  confidence  Float            @default(1.0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  projects    ProjectContext[]
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projects ProjectContext[]
-
-  @@index([userId])
   @@unique([userId, name])
+  @@index([userId])
 }
 
 model ProjectContext {
-  id           String   @id @default(cuid())
+  id           String         @id @default(cuid())
   userId       String
   identityId   String?
   name         String
   description  String?
-  status       String   @default("active")
-  keywords     Json     @default("[]")
-  participants Json     @default("[]")
-  confidence   Float    @default(1.0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  status       String         @default("active")
+  keywords     Json           @default("[]")
+  participants Json           @default("[]")
+  confidence   Float          @default(1.0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  matters      MatterMemory[]
+  identity     UserIdentity?  @relation(fields: [identityId], references: [id])
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  identity  UserIdentity? @relation(fields: [identityId], references: [id])
-  matters   MatterMemory[]
-
+  @@unique([userId, name])
   @@index([userId])
   @@index([identityId])
-  @@unique([userId, name])
 }
 
 model FailedEmailSync {
@@ -367,122 +308,84 @@ model FailedEmailSync {
   sender         String?
   errorReason    String
   retryCount     Int       @default(0)
-  status         String    @default("pending") // pending | retrying | resolved | permanent_failed
+  status         String    @default("pending")
   firstFailedAt  DateTime  @default(now())
   lastFailedAt   DateTime  @default(now())
   resolvedAt     DateTime?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, gmailMessageId])
 }
 
 model ThreadMemory {
-  id       String @id @default(cuid())
-  userId   String
-  threadId String
-
-  title   String // cleaned, specific event/matter title
-  topic   String @default("other") // meeting | invoice | project_update | support | application | approval | deadline | other
-  summary String // one-sentence current state of this thread
-  status  String @default("open") // open | pending | waiting_reply | completed
-
-  nextAction String? // next concrete step the user needs to take, if any
-
-  matterId     String? // FK to MatterMemory (null until matter matching runs)
-  linkedTaskId String? // primary task id for this thread (set after first task is created)
-  lastEmailId  String? // most recently processed email id
-  lastMessageAt DateTime?
-  emailCount   Int @default(0)
-
-  lastClassification String? // action | awareness | ignore | uncertain
-  participants       Json    @default("[]") // JSON array of unique senders seen in thread
-
-  needsFullAnalysis Boolean @default(false) // hint: true when bodyPreview was insufficient
-  confidence        Float   @default(1.0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  matter MatterMemory? @relation(fields: [matterId], references: [id])
+  id                 String        @id @default(cuid())
+  userId             String
+  threadId           String
+  title              String
+  topic              String        @default("other")
+  summary            String
+  status             String        @default("open")
+  nextAction         String?
+  linkedTaskId       String?
+  lastEmailId        String?
+  lastMessageAt      DateTime?
+  emailCount         Int           @default(0)
+  lastClassification String?
+  participants       Json          @default("[]")
+  needsFullAnalysis  Boolean       @default(false)
+  confidence         Float         @default(1.0)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  matterId           String?
+  matter             MatterMemory? @relation(fields: [matterId], references: [id])
 
   @@unique([userId, threadId])
 }
 
-// ---------------------------------------------------------------------------
-// Retention & Cleanup Models
-// ---------------------------------------------------------------------------
-
-// Tracks individual email attachments (replaces the hasAttachments boolean for
-// retention purposes). Actual files live on Gmail; purgedAt marks that the local
-// tracking record has been cleared and the attachment can no longer be fetched.
 model Attachment {
   id                String    @id @default(cuid())
   emailId           String
   filename          String
   mimeType          String    @default("")
-  size              Int       @default(0)  // bytes; 0 if unknown
-  gmailAttachmentId String?               // used to re-fetch from Gmail API
-  purgedAt          DateTime?             // set when local record is cleared
+  size              Int       @default(0)
+  gmailAttachmentId String?
+  purgedAt          DateTime?
   createdAt         DateTime  @default(now())
-
-  email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  email             Email     @relation(fields: [emailId], references: [id], onDelete: Cascade)
 
   @@index([emailId])
 }
 
-// Per-user configurable retention thresholds. Created on first access with
-// sensible defaults matching the product spec.
 model RetentionPolicy {
-  id     String @id @default(cuid())
-  userId String @unique
-
-  // General emails (no associated completed task)
-  // Days are measured from email.receivedAt
-  metadataOnlyAfterDays Int @default(30)
-  purgeAfterDays        Int @default(90)
-
-  // Emails linked to completed tasks
-  // taskDoneArchiveAfterDays: days after task.completedAt (0 = immediately on completion)
-  // taskDoneMetadataOnlyAfterDays: days after email.archivedAt
-  // taskDoneRestoreWindowDays: how long after metadataOnlyAt the user can restore
-  taskDoneArchiveAfterDays      Int @default(0)
-  taskDoneMetadataOnlyAfterDays Int @default(30)
-  taskDoneRestoreWindowDays     Int @default(30)
-
-  // Attachment cleanup: days from email.receivedAt before purging attachment records
-  attachmentPurgeAfterDays Int @default(60)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                            String   @id @default(cuid())
+  userId                        String   @unique
+  metadataOnlyAfterDays         Int      @default(30)
+  purgeAfterDays                Int      @default(90)
+  taskDoneArchiveAfterDays      Int      @default(0)
+  taskDoneMetadataOnlyAfterDays Int      @default(30)
+  taskDoneRestoreWindowDays     Int      @default(30)
+  attachmentPurgeAfterDays      Int      @default(60)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+  user                          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// Whitelist rules that permanently protect matching emails from cleanup.
-// A single matching rule is sufficient to protect an email.
 model ProtectionRule {
-  id       String             @id @default(cuid())
-  userId   String
-  ruleType ProtectionRuleType
-  // value semantics by type:
-  //   CONTACT → full sender email (e.g. alice@example.com)
-  //   DOMAIN  → domain without @ (e.g. acme.com)
-  //   LABEL   → Gmail label name (e.g. STARRED, IMPORTANT)
-  value    String
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String             @id @default(cuid())
+  userId    String
+  ruleType  ProtectionRuleType
+  value     String
+  createdAt DateTime           @default(now())
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, ruleType, value])
   @@index([userId])
 }
 
-// Audit log for each cleanup run (cron or manual).
 model RetentionJobLog {
   id                String    @id @default(cuid())
   userId            String
-  triggeredBy       String    @default("cron")  // "cron" | "manual"
+  triggeredBy       String    @default("cron")
   startedAt         DateTime  @default(now())
   completedAt       DateTime?
   emailsArchived    Int       @default(0)
@@ -492,8 +395,7 @@ model RetentionJobLog {
   bytesFreed        BigInt    @default(0)
   errorCount        Int       @default(0)
   errors            Json?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, startedAt(sort: Desc)])
 }
@@ -507,4 +409,17 @@ model ErrorLog {
   createdAt DateTime @default(now())
 
   @@index([action, createdAt(sort: Desc)])
+}
+
+enum RetentionStatus {
+  ACTIVE
+  ARCHIVED
+  METADATA_ONLY
+  PURGED
+}
+
+enum ProtectionRuleType {
+  CONTACT
+  DOMAIN
+  LABEL
 }
