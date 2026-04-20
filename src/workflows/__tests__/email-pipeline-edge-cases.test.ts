@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 //   4. AI returns unknown category → taskCreated:false, no crash
 //   5. null bodyFull + adequate bodyPreview → classified with preview (no crash)
 //   6. Empty/null sender → pipeline completes without crash
+//   7. null/empty subject → AI still called, no crash
+//   8. AI extractTask returns partial/malformed fields → pipeline doesn't crash
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -387,5 +389,82 @@ describe('processEmail — awareness invariant', () => {
 
     expect(result.taskCreated).toBe(false)
     expect(taskRepo.createTask).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// null / empty subject
+//
+// The subject field is optional in some Gmail messages.  The pipeline must
+// not crash and must still call classifyEmail — the body alone may be enough
+// to classify the email.
+// ---------------------------------------------------------------------------
+
+describe('processEmail — null or empty subject', () => {
+  it('completes without crash when subject is null', async () => {
+    await expect(processEmail('user-1', makeEmail({ subject: null as any }))).resolves.toBeDefined()
+  })
+
+  it('still calls classifyEmail when subject is null', async () => {
+    await processEmail('user-1', makeEmail({ subject: null as any }))
+    expect(ai.classifyEmail).toHaveBeenCalledOnce()
+  })
+
+  it('completes without crash when subject is an empty string', async () => {
+    await expect(processEmail('user-1', makeEmail({ subject: '' }))).resolves.toBeDefined()
+  })
+
+  it('still calls classifyEmail when subject is empty string', async () => {
+    await processEmail('user-1', makeEmail({ subject: '' }))
+    expect(ai.classifyEmail).toHaveBeenCalledOnce()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AI extractTask returns partial / malformed fields
+//
+// If extractTask returns missing or null fields the pipeline must not crash.
+// The outer try/catch must absorb any downstream TypeError and return
+// uncertain + markClassificationFailed — the email must never be stuck.
+// ---------------------------------------------------------------------------
+
+describe('processEmail — extractTask returns partial fields', () => {
+  it('does not throw when extractTask returns an empty title', async () => {
+    vi.mocked(ai.extractTask).mockResolvedValue({
+      title: '', summary: '', actionItems: [],
+      explicitDeadline: null, inferredDeadline: null, deadlineConfidence: null as any,
+    })
+
+    await expect(processEmail('user-1', makeEmail())).resolves.toBeDefined()
+  })
+
+  it('returns a defined result (not undefined) when extractTask returns empty fields', async () => {
+    vi.mocked(ai.extractTask).mockResolvedValue({
+      title: '', summary: '', actionItems: [],
+      explicitDeadline: null, inferredDeadline: null, deadlineConfidence: null as any,
+    })
+
+    const result = await processEmail('user-1', makeEmail())
+    expect(result).toBeDefined()
+    expect(result.emailId).toBe('email-1')
+  })
+
+  it('calls markClassificationFailed if extractTask returns null fields that crash downstream', async () => {
+    // Simulate malformed AI output that causes a TypeError in scorePriority
+    vi.mocked(ai.extractTask).mockResolvedValue(null as any)
+
+    await processEmail('user-1', makeEmail())
+
+    // The outer catch must have fired — email must be marked failed, not stuck in pending
+    expect(emailRepo.markClassificationFailed).toHaveBeenCalledWith('email-1')
+  })
+
+  it('returns uncertain classification when extractTask returns null', async () => {
+    vi.mocked(ai.extractTask).mockResolvedValue(null as any)
+
+    const result = await processEmail('user-1', makeEmail())
+
+    expect(result.classification).toBe('uncertain')
+    expect(result.taskCreated).toBe(false)
   })
 })
