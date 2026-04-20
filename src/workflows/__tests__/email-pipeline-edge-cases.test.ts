@@ -168,14 +168,14 @@ beforeEach(() => {
     reasoning: 'Clear action required', isWorkRelated: true,
   })
   vi.mocked(ai.updateThreadMemory).mockResolvedValue({
-    title: 'Contract Review', topic: 'Legal', summary: 'Review needed',
-    status: 'active', nextAction: 'Review contract', needsFullAnalysis: false,
+    title: 'Contract Review', topic: 'other', summary: 'Review needed',
+    status: 'open', nextAction: 'Review contract', needsFullAnalysis: false,
   })
-  vi.mocked(ai.matchMatter).mockResolvedValue({ matterId: null, confidence: 0 })
+  vi.mocked(ai.matchMatter).mockResolvedValue({ matterId: null, confidence: 0, reasoning: 'No match found' })
   vi.mocked(ai.extractTask).mockResolvedValue({
     title: 'Review contract', summary: 'Review the attached contract',
     actionItems: ['Review contract'], explicitDeadline: null,
-    inferredDeadline: null, deadlineConfidence: null,
+    inferredDeadline: null, deadlineConfidence: 0,
   })
   vi.mocked(ai.scorePriority).mockResolvedValue({
     urgency: 70, impact: 60, combinedScore: 65, reasoning: 'Time-sensitive work task',
