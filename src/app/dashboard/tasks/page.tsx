@@ -33,6 +33,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import { CACHE_TIME } from '@/lib/query-cache'
 
 type ViewMode = 'list' | 'timeline' | 'calendar'
@@ -158,10 +159,10 @@ export default function TasksPage() {
         // Navigate to the new task
         router.push(`/dashboard/tasks/${data.data.id}`)
       } else {
-        toast.error('Failed to create task')
+        showError('Failed to create task')
       }
     } catch {
-      toast.error('Failed to create task')
+      showError('Failed to create task')
     } finally {
       setCreatingTask(false)
     }

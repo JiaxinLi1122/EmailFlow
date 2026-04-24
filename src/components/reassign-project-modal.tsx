@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { InlineNotice } from '@/components/inline-notice'
 import { UserRound, FolderOpen, Plus, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import { CACHE_TIME } from '@/lib/query-cache'
 
 type Identity = { id: string; name: string }
@@ -165,7 +166,7 @@ export function ReassignProjectModal({
         body: JSON.stringify({ threadId, projectId }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to reassign')
+      if (!res.ok) throw new Error(data.error?.message ?? data.error ?? 'Failed to reassign')
 
       for (const key of invalidateKeys) {
         queryClient.invalidateQueries({ queryKey: key })
@@ -181,7 +182,7 @@ export function ReassignProjectModal({
       handleClose(false)
     } catch (error) {
       console.error(error)
-      toast.error('Something went wrong')
+      showError('Something went wrong')
     } finally {
       setSaving(false)
     }

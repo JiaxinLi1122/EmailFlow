@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FolderOpen, Sparkles, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 
 import type { BatchClassificationReviewPayload } from '@/services/email-sync-service'
 import { Button } from '@/components/ui/button'
@@ -179,7 +180,7 @@ export function BatchClassificationReviewDialog({ open, onOpenChange, payload, o
       onConfirmed?.()
     } catch (err) {
       console.error('Failed to confirm review:', err)
-      toast.error(err instanceof Error ? err.message : 'Failed to confirm review')
+      showError(err instanceof Error ? err.message : 'Failed to confirm review')
     } finally {
       setSaving(false)
     }

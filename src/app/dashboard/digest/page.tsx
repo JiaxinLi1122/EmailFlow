@@ -20,6 +20,7 @@ import {
   ListTodo,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import ReactMarkdown from 'react-markdown'
 import { useState } from 'react'
 
@@ -65,7 +66,7 @@ export default function DigestPage() {
         queryClient.invalidateQueries({ queryKey: ['digests'] })
         toast.success('Digest generated')
       } else {
-        toast.error(data.error?.message || 'Failed to generate digest')
+        showError(data.error?.message || 'Failed to generate digest')
       }
     },
   })

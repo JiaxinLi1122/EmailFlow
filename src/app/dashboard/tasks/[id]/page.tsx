@@ -24,6 +24,7 @@ import {
 import { useState, useEffect, useRef } from 'react'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import Link from 'next/link'
 import { CACHE_TIME } from '@/lib/query-cache'
 
@@ -419,10 +420,10 @@ export default function TaskDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['task', taskId] })
         toast.success('Email unlinked')
       } else {
-        toast.error('Failed to unlink email')
+        showError('Failed to unlink email')
       }
     } catch {
-      toast.error('Failed to unlink email')
+      showError('Failed to unlink email')
     } finally {
       setUnlinkingEmailId(null)
     }

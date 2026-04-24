@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import Link from 'next/link'
 import { CACHE_TIME } from '@/lib/query-cache'
 
@@ -100,7 +101,7 @@ export function RetentionPolicyCard() {
       setEditMode(false)
       setDraft({})
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => showError(err.message),
   })
 
   const addRuleMutation = useMutation({
@@ -134,7 +135,7 @@ export function RetentionPolicyCard() {
       toast.success('Rule removed')
       queryClient.invalidateQueries({ queryKey: ['retention-whitelist'] })
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => showError(err.message),
   })
 
   // ---- Handlers ----

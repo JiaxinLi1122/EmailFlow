@@ -30,6 +30,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { EMAIL_CLASS_CONFIG, getEmailClassConfig } from '@/lib/email-classification'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import { CACHE_TIME } from '@/lib/query-cache'
 
 type EmailTaskLink = {
@@ -72,13 +73,13 @@ export default function EmailDetailPage() {
       const r = await fetch(`/api/emails/${emailId}/restore`, { method: 'POST' })
       const json = await r.json()
       if (!r.ok) {
-        toast.error(json?.error?.message || json?.error || 'Restore failed')
+        showError(json?.error?.message || json?.error || 'Restore failed')
       } else {
         toast.success('Email body restored')
         queryClient.invalidateQueries({ queryKey: ['email', emailId] })
       }
     } catch {
-      toast.error('Restore failed')
+      showError('Restore failed')
     } finally {
       setRestoring(false)
     }
@@ -98,7 +99,7 @@ export default function EmailDetailPage() {
         toast.success(`Marked as ${getEmailClassConfig(newClass).label}`)
       }
     } catch {
-      toast.error('Failed to update classification')
+      showError('Failed to update classification')
     } finally {
       setClassifying(false)
     }
@@ -114,10 +115,10 @@ export default function EmailDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['email', emailId] })
         toast.success('Task unlinked')
       } else {
-        toast.error('Failed to unlink task')
+        showError('Failed to unlink task')
       }
     } catch {
-      toast.error('Failed to unlink task')
+      showError('Failed to unlink task')
     } finally {
       setUnlinkingTaskId(null)
     }
@@ -147,10 +148,10 @@ export default function EmailDetailPage() {
         setTaskSummary('')
         setLinkedEmailIds([])
       } else {
-        toast.error('Failed to create task')
+        showError('Failed to create task')
       }
     } catch {
-      toast.error('Failed to create task')
+      showError('Failed to create task')
     } finally {
       setCreatingTask(false)
     }

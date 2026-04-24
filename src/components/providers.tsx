@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { CACHE_TIME } from '@/lib/query-cache'
 import { SessionExpiredWatcher, SESSION_401_EVENT } from '@/components/session-expired-watcher'
+import { ErrorDialogWatcher } from '@/components/error-dialog'
 
 // Install a global fetch interceptor once (browser only).
 // Any /api/ route returning 401 dispatches SESSION_401_EVENT so the
@@ -54,6 +55,7 @@ export function QueryProviders({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SessionExpiredWatcher />
+      <ErrorDialogWatcher />
       {children}
     </QueryClientProvider>
   )

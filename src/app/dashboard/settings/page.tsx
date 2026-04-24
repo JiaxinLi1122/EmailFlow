@@ -32,6 +32,7 @@ import {
   Unplug,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import { CACHE_TIME } from '@/lib/query-cache'
 import { requestStepUp, verifyStepUp, type StepUpAction } from '@/lib/step-up-client'
 import { RetentionPolicyCard } from '@/components/retention-policy-card'
@@ -274,7 +275,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to disconnect Gmail')
+      showError(err.message || 'Failed to disconnect Gmail')
     },
   })
 
@@ -300,7 +301,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to update sync window')
+      showError(err.message || 'Failed to update sync window')
     },
   })
 
@@ -322,7 +323,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to update timezone')
+      showError(err.message || 'Failed to update timezone')
     },
   })
 
@@ -801,7 +802,7 @@ function PasswordCard() {
       const res = await fetch('/api/auth/request-password-reset', { method: 'POST' })
       const data = await res.json()
       if (!data.success) {
-        setError(data.error || 'Failed to send reset email')
+        setError(data.error?.message ?? data.error ?? 'Failed to send reset email')
       } else {
         setSent(true)
       }
@@ -896,7 +897,7 @@ function DeviceSessionsCard({
       queryClient.invalidateQueries({ queryKey: ['auth-sessions'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to sign out device')
+      showError(err.message || 'Failed to sign out device')
     },
   })
 
@@ -915,7 +916,7 @@ function DeviceSessionsCard({
       queryClient.invalidateQueries({ queryKey: ['auth-sessions'] })
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to sign out other devices')
+      showError(err.message || 'Failed to sign out other devices')
     },
   })
 
@@ -1128,7 +1129,7 @@ function ChangePasswordCard() {
         body: JSON.stringify({ currentPassword, newPassword, stepUpToken }),
       })
       const data = await res.json()
-      if (!data.success) throw new Error(data.error || 'Failed to change password')
+      if (!data.success) throw new Error(data.error?.message ?? data.error ?? 'Failed to change password')
       setSuccess(true)
       setStepUpToken(null)
       setCurrentPassword('')
@@ -1242,7 +1243,7 @@ function TwoFactorCard({ totpEnabled, onDisabled }: { totpEnabled: boolean; onDi
         body: JSON.stringify({ stepUpToken: token }),
       })
       const data = await res.json()
-      if (!data.success) throw new Error(data.error || 'Failed to disable 2FA')
+      if (!data.success) throw new Error(data.error?.message ?? data.error ?? 'Failed to disable 2FA')
       toast.success('Two-factor authentication disabled')
       onDisabled()
     } catch (err) {
@@ -1343,7 +1344,7 @@ function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
         body: JSON.stringify({ stepUpToken: token }),
       })
       const data = await res.json()
-      if (!data.success) throw new Error(data.error || 'Failed to delete account')
+      if (!data.success) throw new Error(data.error?.message ?? data.error ?? 'Failed to delete account')
       toast.success('Account deleted')
       onDeleted()
     } catch (err) {
@@ -1438,7 +1439,7 @@ function GoogleAccountCard({
       onDisconnected()
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to disconnect Google account')
+      showError(err.message || 'Failed to disconnect Google account')
     },
   })
 

@@ -22,6 +22,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
 import { requestStepUp, verifyStepUp } from '@/lib/step-up-client'
@@ -117,7 +118,7 @@ export default function CleanupPage() {
       queryClient.invalidateQueries({ queryKey: ['cleanup-preview'] })
       queryClient.invalidateQueries({ queryKey: ['cleanup-logs'] })
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => showError(err.message),
   })
 
   // ---- Step-up flow ----
@@ -131,7 +132,7 @@ export default function CleanupPage() {
       setStepUpCode('')
       setStepUpOpen(true)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start verification')
+      showError(err instanceof Error ? err.message : 'Failed to start verification')
     } finally {
       setStepUpLoading(false)
     }

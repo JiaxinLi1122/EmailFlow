@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, GripVertical, UserRound } from 'lucide-react'
 import { getPriorityBand } from '@/types'
 import { toast } from 'sonner'
+import { showError } from '@/components/error-dialog'
 
 const DAY_MS = 86400000
 const COL_WIDTH = 48
@@ -357,7 +358,7 @@ export function GanttTimeline({ tasks, updateTask }: Props) {
               pendingRef.current = null
               setPendingSnapshot(null)
               forceRender((n) => n + 1)
-              toast.error('Failed to update timeline')
+              showError('Failed to update timeline')
             },
           }
         )
