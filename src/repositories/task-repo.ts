@@ -103,19 +103,29 @@ export async function findTasksPaginated(
             },
           },
         },
+        matter: {
+          include: { projectContext: { include: { identity: true } } },
+        },
       },
     }),
     prisma.task.count({ where }),
   ])
 
-  // Enrich each task with project + matter from ThreadMemory (best-effort)
+  // Enrich each task with project + matter — prefer explicit task.matter, fall back to ThreadMemory
   try {
-    const threadIds = tasks.flatMap((t) =>
-      t.emailLinks.map((l) => l.email?.threadId).filter((id): id is string => !!id)
-    )
+    const threadIds = tasks
+      .filter((t) => !t.matterId)
+      .flatMap((t) => t.emailLinks.map((l) => l.email?.threadId).filter((id): id is string => !!id))
     const ctxMap = await buildThreadContextMap(userId, threadIds)
 
     const enriched = tasks.map((task) => {
+      if (task.matter) {
+        return {
+          ...task,
+          project: extractProject(task.matter),
+          matter: { id: task.matter.id, title: task.matter.title },
+        }
+      }
       const threadId = task.emailLinks[0]?.email?.threadId ?? null
       const ctx = threadId ? ctxMap.get(threadId) : null
       return { ...task, project: ctx?.project ?? null, matter: ctx?.matter ?? null }
@@ -125,6 +135,27 @@ export async function findTasksPaginated(
   } catch (err) {
     console.error('[task-repo] enrichment failed, returning tasks without project context:', err)
     return { tasks, total }
+  }
+}
+
+type MatterWithProject = {
+  id: string
+  title: string
+  projectContext: {
+    id: string
+    name: string
+    identity: { id: string; name: string } | null
+  } | null
+}
+
+function extractProject(matter: MatterWithProject): ProjectContext {
+  if (!matter.projectContext) return null
+  return {
+    id: matter.projectContext.id,
+    name: matter.projectContext.name,
+    identity: matter.projectContext.identity
+      ? { id: matter.projectContext.identity.id, name: matter.projectContext.identity.name }
+      : null,
   }
 }
 
@@ -180,11 +211,25 @@ export async function findTaskById(userId: string, taskId: string) {
           },
         },
       },
+      matter: {
+        include: { projectContext: { include: { identity: true } } },
+      },
     },
   })
 
-  const threadId = task?.emailLinks?.[0]?.email?.threadId ?? null
-  if (!task || !threadId) return task
+  if (!task) return task
+
+  // Prefer explicit task.matter, fall back to ThreadMemory
+  if (task.matter) {
+    return {
+      ...task,
+      project: extractProject(task.matter),
+      matter: { id: task.matter.id, title: task.matter.title },
+    }
+  }
+
+  const threadId = task.emailLinks?.[0]?.email?.threadId ?? null
+  if (!threadId) return { ...task, project: null, matter: null }
 
   try {
     const ctxMap = await buildThreadContextMap(userId, [threadId])

@@ -485,10 +485,9 @@ export default function TaskDetailPage() {
         />
 
         <button
-          onClick={() => threadId && setShowReassign(true)}
-          disabled={!threadId}
-          className="group animate-fade-in-up stagger-2 flex w-full items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-2.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50 disabled:cursor-default disabled:opacity-60"
-          title={threadId ? 'Click to change project' : 'No email thread linked — cannot reassign'}
+          onClick={() => setShowReassign(true)}
+          className="group animate-fade-in-up stagger-2 flex w-full items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-2.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50"
+          title="Click to change project"
         >
           <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
           <span className="text-xs font-medium text-slate-500">{project?.identity?.name || 'Unassigned'}</span>
@@ -507,15 +506,14 @@ export default function TaskDetailPage() {
           </span>
         </button>
 
-        {threadId && (
-          <ReassignProjectModal
-            open={showReassign}
-            onOpenChange={setShowReassign}
-            threadId={threadId}
-            currentProject={project}
-            invalidateKeys={[['task', taskId]]}
-          />
-        )}
+        <ReassignProjectModal
+          open={showReassign}
+          onOpenChange={setShowReassign}
+          threadId={threadId ?? undefined}
+          taskId={!threadId ? taskId : undefined}
+          currentProject={project}
+          invalidateKeys={[['task', taskId]]}
+        />
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Left: Task content */}

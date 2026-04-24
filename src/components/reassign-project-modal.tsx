@@ -13,18 +13,21 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineNotice } from '@/components/inline-notice'
-import { UserRound, FolderOpen, Plus, Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { UserRound, FolderOpen, Plus, Check, ChevronDown, ChevronRight, Mail, CheckSquare, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { showError } from '@/components/error-dialog'
 import { CACHE_TIME } from '@/lib/query-cache'
 
 type Identity = { id: string; name: string }
 type Project = { id: string; name: string; identity: Identity | null }
+type RelatedTask = { id: string; title: string; project: { id: string; name: string; identity: Identity | null } | null }
+type RelatedItems = { threadId: string; emailCount: number; tasks: RelatedTask[] }
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  threadId: string
+  threadId?: string
+  taskId?: string
   currentProject?: { id: string; name: string; identity: { id: string; name: string } | null } | null
   invalidateKeys?: string[][]
 }
@@ -33,11 +36,13 @@ export function ReassignProjectModal({
   open,
   onOpenChange,
   threadId,
+  taskId,
   currentProject,
   invalidateKeys = [],
 }: Props) {
   const queryClient = useQueryClient()
 
+  // Step 1 state
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [showNewProject, setShowNewProject] = useState(false)
@@ -46,6 +51,14 @@ export function ReassignProjectModal({
   const [showNewIdentity, setShowNewIdentity] = useState(false)
   const [newIdentityName, setNewIdentityName] = useState('')
   const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
+  const [nextLoading, setNextLoading] = useState(false)
+
+  // Step 2 state
+  const [step, setStep] = useState<'pick' | 'review'>('pick')
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null)
+  const [relatedItems, setRelatedItems] = useState<RelatedItems | null>(null)
+  const [includeThread, setIncludeThread] = useState(true)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
 
   const { data: projectsRes } = useQuery({
@@ -66,16 +79,11 @@ export function ReassignProjectModal({
 
   const grouped = useMemo(() => {
     const map = new Map<string, { identity: Identity | null; projects: Project[] }>()
-    const noIdentityKey = '__none__'
-
     for (const project of projects) {
-      const key = project.identity?.id || noIdentityKey
-      if (!map.has(key)) {
-        map.set(key, { identity: project.identity, projects: [] })
-      }
+      const key = project.identity?.id || '__none__'
+      if (!map.has(key)) map.set(key, { identity: project.identity, projects: [] })
       map.get(key)?.projects.push(project)
     }
-
     return Array.from(map.values()).sort((a, b) =>
       (a.identity?.name || 'zzz').localeCompare(b.identity?.name || 'zzz')
     )
@@ -83,28 +91,21 @@ export function ReassignProjectModal({
 
   const filteredGrouped = useMemo(() => {
     if (!search.trim()) return grouped
-
     const query = search.toLowerCase()
     return grouped
       .map((group) => ({
         ...group,
         projects: group.projects.filter(
-          (project) =>
-            project.name.toLowerCase().includes(query) ||
-            group.identity?.name.toLowerCase().includes(query)
+          (p) => p.name.toLowerCase().includes(query) || group.identity?.name.toLowerCase().includes(query)
         ),
       }))
-      .filter((group) => group.projects.length > 0)
+      .filter((g) => g.projects.length > 0)
   }, [grouped, search])
 
   const toggleIdentity = (key: string) =>
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
+      next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
 
@@ -116,6 +117,12 @@ export function ReassignProjectModal({
     setNewProjectIdentityId('')
     setShowNewIdentity(false)
     setNewIdentityName('')
+    setNextLoading(false)
+    setStep('pick')
+    setPendingProjectId(null)
+    setRelatedItems(null)
+    setIncludeThread(true)
+    setSelectedTaskIds(new Set())
     setSaving(false)
   }
 
@@ -124,250 +131,354 @@ export function ReassignProjectModal({
     onOpenChange(nextOpen)
   }
 
-  const handleSave = async () => {
-    setSaving(true)
+  // Resolve project (create identity/project if needed), returns projectId or null
+  async function resolveProject(): Promise<string | null> {
+    let projectId = selectedProjectId
+    let identityId = newProjectIdentityId || null
 
+    if (showNewProject && showNewIdentity && newIdentityName.trim()) {
+      const identityRes = await fetch('/api/identities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newIdentityName.trim() }),
+      })
+      const identityData = await identityRes.json()
+      if (!identityData.data?.id) throw new Error('Failed to create identity')
+      identityId = identityData.data.id
+      queryClient.invalidateQueries({ queryKey: ['identities'] })
+    }
+
+    if (showNewProject && newProjectName.trim()) {
+      const projectRes = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newProjectName.trim(), identityId }),
+      })
+      const projectData = await projectRes.json()
+      if (!projectData.data?.id) throw new Error('Failed to create project')
+      projectId = projectData.data.id
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    }
+
+    return projectId
+  }
+
+  async function handleNext() {
+    setNextLoading(true)
     try {
-      let projectId = selectedProjectId
-      let identityId = newProjectIdentityId || null
+      const projectId = await resolveProject()
+      if (!projectId) { toast.error('Please select or create a project'); return }
 
-      if (showNewProject && showNewIdentity && newIdentityName.trim()) {
-        const identityRes = await fetch('/api/identities', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: newIdentityName.trim() }),
-        })
-        const identityData = await identityRes.json()
-        if (!identityData.data?.id) throw new Error('Failed to create identity')
-        identityId = identityData.data.id
-        queryClient.invalidateQueries({ queryKey: ['identities'] })
-      }
-
-      if (showNewProject && newProjectName.trim()) {
-        const projectRes = await fetch('/api/projects', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: newProjectName.trim(), identityId }),
-        })
-        const projectData = await projectRes.json()
-        if (!projectData.data?.id) throw new Error('Failed to create project')
-        projectId = projectData.data.id
-        queryClient.invalidateQueries({ queryKey: ['projects'] })
-      }
-
-      if (!projectId) {
-        toast.error('Please select or create a project')
+      // Standalone task — skip review step
+      if (!threadId) {
+        await saveTaskDirect(projectId)
         return
       }
 
-      const res = await fetch('/api/threads/reassign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ threadId, projectId }),
-      })
+      // Fetch related items
+      const res = await fetch(`/api/threads/${threadId}/related`)
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error?.message ?? data.error ?? 'Failed to reassign')
+      const related: RelatedItems = data.data
 
-      for (const key of invalidateKeys) {
-        queryClient.invalidateQueries({ queryKey: key })
+      // No tasks to review — save directly
+      if (!related || related.tasks.length === 0) {
+        await saveThread(projectId, true, [])
+        return
       }
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['emails'] })
 
-      const affectedTasks = data.data.affectedTasks as number
-      const affectedEmails = data.data.affectedEmails as number
-      toast.success(
-        `Reassigned: ${affectedTasks} task${affectedTasks !== 1 ? 's' : ''} and ${affectedEmails} email${affectedEmails !== 1 ? 's' : ''} updated`
-      )
-      handleClose(false)
-    } catch (error) {
-      console.error(error)
-      showError('Something went wrong')
+      // Show review step
+      setRelatedItems(related)
+      setPendingProjectId(projectId)
+      setIncludeThread(true)
+      setSelectedTaskIds(new Set(related.tasks.map((t) => t.id)))
+      setStep('review')
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setNextLoading(false)
+    }
+  }
+
+  async function saveThread(projectId: string, incThread: boolean, tIds: string[]) {
+    const res = await fetch('/api/threads/reassign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, projectId, includeThread: incThread, taskIds: tIds }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error?.message ?? data.error ?? 'Failed to reassign')
+
+    const { affectedEmails, affectedTasks } = data.data
+    toast.success(
+      `Reassigned: ${affectedEmails} email${affectedEmails !== 1 ? 's' : ''} and ${affectedTasks} task${affectedTasks !== 1 ? 's' : ''} updated`
+    )
+    invalidateAll()
+    handleClose(false)
+  }
+
+  async function saveTaskDirect(projectId: string) {
+    const res = await fetch(`/api/tasks/${taskId}/reassign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error?.message ?? data.error ?? 'Failed to reassign task')
+    toast.success('Project updated')
+    invalidateAll()
+    handleClose(false)
+  }
+
+  function invalidateAll() {
+    for (const key of invalidateKeys) queryClient.invalidateQueries({ queryKey: key })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['emails'] })
+  }
+
+  async function handleConfirm() {
+    if (!pendingProjectId) return
+    setSaving(true)
+    try {
+      await saveThread(pendingProjectId, includeThread, [...selectedTaskIds])
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setSaving(false)
     }
   }
 
-  const canSave = showNewProject ? !!newProjectName.trim() : !!selectedProjectId
+  const canNext = showNewProject ? !!newProjectName.trim() : !!selectedProjectId
   const isCurrentProject = (id: string) => id === currentProject?.id
+  const nothingSelected = !includeThread && selectedTaskIds.size === 0
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Change Project</DialogTitle>
-        </DialogHeader>
+    <>
+      {/* Step 1: Pick project */}
+      <Dialog open={open && step === 'pick'} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Project</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-4 py-1">
-          {currentProject && (
-            <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-              <span className="font-medium text-slate-400">Current:</span>
-              <UserRound className="h-3 w-3" />
-              <span>{currentProject.identity?.name || 'Unassigned'}</span>
-              <ChevronRight className="h-3 w-3 text-slate-300" />
-              <FolderOpen className="h-3 w-3" />
-              <span className="font-medium text-slate-700">{currentProject.name}</span>
-            </div>
-          )}
-
-          <InlineNotice variant="info">
-            All tasks and emails in this email thread will be reassigned together.
-          </InlineNotice>
-
-          {!showNewProject ? (
-            <>
-              <Input
-                placeholder="Search projects..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9"
-              />
-
-              <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
-                {filteredGrouped.length === 0 && (
-                  <p className="px-3 py-4 text-center text-xs text-slate-400">No projects found</p>
-                )}
-                {filteredGrouped.map((group) => {
-                  const key = group.identity?.id || '__none__'
-                  const isCollapsed = collapsedIdentities.has(key)
-
-                  return (
-                    <div key={key}>
-                      <button
-                        onClick={() => toggleIdentity(key)}
-                        className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-100"
-                      >
-                        <ChevronDown
-                          className={`h-3 w-3 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
-                        />
-                        <UserRound className="h-3 w-3" />
-                        {group.identity?.name || 'No Identity'}
-                      </button>
-
-                      {!isCollapsed &&
-                        group.projects.map((project) => (
-                          <button
-                            key={project.id}
-                            onClick={() => setSelectedProjectId(project.id)}
-                            disabled={isCurrentProject(project.id)}
-                            className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
-                              isCurrentProject(project.id)
-                                ? 'cursor-default text-slate-400'
-                                : selectedProjectId === project.id
-                                  ? 'bg-blue-50 text-blue-700'
-                                  : 'text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                            <span className="flex-1">{project.name}</span>
-                            {isCurrentProject(project.id) && (
-                              <span className="text-[10px] text-slate-400">current</span>
-                            )}
-                            {selectedProjectId === project.id && !isCurrentProject(project.id) && (
-                              <Check className="h-3.5 w-3.5 text-blue-600" />
-                            )}
-                          </button>
-                        ))}
-                    </div>
-                  )
-                })}
+          <div className="space-y-4 py-1">
+            {currentProject && (
+              <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                <span className="font-medium text-slate-400">Current:</span>
+                <UserRound className="h-3 w-3" />
+                <span>{currentProject.identity?.name || 'Unassigned'}</span>
+                <ChevronRight className="h-3 w-3 text-slate-300" />
+                <FolderOpen className="h-3 w-3" />
+                <span className="font-medium text-slate-700">{currentProject.name}</span>
               </div>
+            )}
 
-              <button
-                onClick={() => {
-                  setShowNewProject(true)
-                  setSelectedProjectId(null)
-                }}
-                className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Create new project
-              </button>
-            </>
-          ) : (
-            <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
-              <p className="text-xs font-semibold text-blue-700">New Project</p>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs">Project name</Label>
+            {!showNewProject ? (
+              <>
                 <Input
-                  placeholder="e.g. Website Redesign"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="Search projects..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   className="h-9"
-                  autoFocus
                 />
-              </div>
 
-              {!showNewIdentity ? (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Identity (optional)</Label>
-                  <select
-                    value={newProjectIdentityId}
-                    onChange={(e) => setNewProjectIdentityId(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="">None</option>
-                    {identities.map((identity) => (
-                      <option key={identity.id} value={identity.id}>
-                        {identity.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => setShowNewIdentity(true)}
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    <Plus className="h-3 w-3" />
-                    Create new identity instead
-                  </button>
+                <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                  {filteredGrouped.length === 0 && (
+                    <p className="px-3 py-4 text-center text-xs text-slate-400">No projects found</p>
+                  )}
+                  {filteredGrouped.map((group) => {
+                    const key = group.identity?.id || '__none__'
+                    const isCollapsed = collapsedIdentities.has(key)
+                    return (
+                      <div key={key}>
+                        <button
+                          onClick={() => toggleIdentity(key)}
+                          className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-100"
+                        >
+                          <ChevronDown className={`h-3 w-3 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                          <UserRound className="h-3 w-3" />
+                          {group.identity?.name || 'No Identity'}
+                        </button>
+                        {!isCollapsed &&
+                          group.projects.map((project) => (
+                            <button
+                              key={project.id}
+                              onClick={() => setSelectedProjectId(project.id)}
+                              disabled={isCurrentProject(project.id)}
+                              className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
+                                isCurrentProject(project.id)
+                                  ? 'cursor-default text-slate-400'
+                                  : selectedProjectId === project.id
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                              <span className="flex-1">{project.name}</span>
+                              {isCurrentProject(project.id) && (
+                                <span className="text-[10px] text-slate-400">current</span>
+                              )}
+                              {selectedProjectId === project.id && !isCurrentProject(project.id) && (
+                                <Check className="h-3.5 w-3.5 text-blue-600" />
+                              )}
+                            </button>
+                          ))}
+                      </div>
+                    )
+                  })}
                 </div>
-              ) : (
+
+                <button
+                  onClick={() => { setShowNewProject(true); setSelectedProjectId(null) }}
+                  className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Create new project
+                </button>
+              </>
+            ) : (
+              <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+                <p className="text-xs font-semibold text-blue-700">New Project</p>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">New identity name</Label>
+                  <Label className="text-xs">Project name</Label>
                   <Input
-                    placeholder="e.g. PM at TechCorp"
-                    value={newIdentityName}
-                    onChange={(e) => setNewIdentityName(e.target.value)}
+                    placeholder="e.g. Website Redesign"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
                     className="h-9"
+                    autoFocus
                   />
-                  <button
-                    onClick={() => {
-                      setShowNewIdentity(false)
-                      setNewIdentityName('')
-                    }}
-                    className="text-xs text-slate-400 hover:text-slate-600"
-                  >
-                    Pick existing identity instead
-                  </button>
                 </div>
-              )}
+                {!showNewIdentity ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Identity (optional)</Label>
+                    <select
+                      value={newProjectIdentityId}
+                      onChange={(e) => setNewProjectIdentityId(e.target.value)}
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">None</option>
+                      {identities.map((identity) => (
+                        <option key={identity.id} value={identity.id}>{identity.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => setShowNewIdentity(true)}
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Create new identity instead
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">New identity name</Label>
+                    <Input
+                      placeholder="e.g. PM at TechCorp"
+                      value={newIdentityName}
+                      onChange={(e) => setNewIdentityName(e.target.value)}
+                      className="h-9"
+                    />
+                    <button
+                      onClick={() => { setShowNewIdentity(false); setNewIdentityName('') }}
+                      className="text-xs text-slate-400 hover:text-slate-600"
+                    >
+                      Pick existing identity instead
+                    </button>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    setShowNewProject(false)
+                    setNewProjectName('')
+                    setNewProjectIdentityId('')
+                    setShowNewIdentity(false)
+                    setNewIdentityName('')
+                  }}
+                  className="text-xs text-slate-400 hover:text-slate-600"
+                >
+                  ← Back to existing projects
+                </button>
+              </div>
+            )}
+          </div>
 
-              <button
-                onClick={() => {
-                  setShowNewProject(false)
-                  setNewProjectName('')
-                  setNewProjectIdentityId('')
-                  setShowNewIdentity(false)
-                  setNewIdentityName('')
-                }}
-                className="text-xs text-slate-400 hover:text-slate-600"
-              >
-                ← Back to existing projects
-              </button>
-            </div>
-          )}
-        </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleClose(false)}>Cancel</Button>
+            <Button onClick={handleNext} disabled={nextLoading || !canNext}>
+              {nextLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Next →
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => handleClose(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={saving || !canSave}>
-            {saving ? 'Saving...' : 'Confirm'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Step 2: Review scope */}
+      <Dialog open={open && step === 'review'} onOpenChange={(v) => { if (!v) handleClose(false) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Apply to related items?</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2 py-1">
+            <p className="text-xs text-slate-500">
+              Select which items should be moved to the new project.
+            </p>
+
+            {relatedItems && (
+              <div className="space-y-1.5">
+                {/* Thread emails row */}
+                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 hover:bg-slate-100/60">
+                  <input
+                    type="checkbox"
+                    checked={includeThread}
+                    onChange={(e) => setIncludeThread(e.target.checked)}
+                    className="h-4 w-4 rounded accent-blue-600"
+                  />
+                  <Mail className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="text-sm text-slate-700">
+                    {relatedItems.emailCount} email{relatedItems.emailCount !== 1 ? 's' : ''} in this thread
+                  </span>
+                </label>
+
+                {/* Individual task rows */}
+                {relatedItems.tasks.map((task) => (
+                  <label
+                    key={task.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.has(task.id)}
+                      onChange={(e) => {
+                        setSelectedTaskIds((prev) => {
+                          const next = new Set(prev)
+                          e.target.checked ? next.add(task.id) : next.delete(task.id)
+                          return next
+                        })
+                      }}
+                      className="h-4 w-4 rounded accent-blue-600"
+                    />
+                    <CheckSquare className="h-4 w-4 shrink-0 text-slate-400" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{task.title}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {nothingSelected && (
+              <p className="text-xs text-amber-600">Select at least one item to reassign.</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStep('pick')}>← Back</Button>
+            <Button onClick={handleConfirm} disabled={saving || nothingSelected}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

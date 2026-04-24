@@ -31,6 +31,7 @@ import {
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
+import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import { showError } from '@/components/error-dialog'
@@ -42,6 +43,7 @@ type TaskStatus = 'pending' | 'confirmed' | 'completed' | 'dismissed'
 type TaskEmailLink = {
   email?: {
     sender?: string | null
+    threadId?: string | null
   } | null
 }
 
@@ -111,6 +113,7 @@ export default function TasksPage() {
   const [taskTitle, setTaskTitle] = useState('')
   const [taskSummary, setTaskSummary] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
+  const [reassignTask, setReassignTask] = useState<TaskItem | null>(null)
   const queryClient = useQueryClient()
 
   // Fetch all tasks (no server-side status filter — we filter client-side for "all")
@@ -249,13 +252,23 @@ export default function TasksPage() {
             description="Try a different filter or create a task manually."
           />
         ) : viewMode === 'list' ? (
-          <TaskListView tasks={tasks} updateTask={updateTask} focusProjectId={focusProjectId} />
+          <TaskListView tasks={tasks} updateTask={updateTask} focusProjectId={focusProjectId} onReassign={setReassignTask} />
         ) : viewMode === 'timeline' ? (
           <GanttTimeline tasks={tasks} updateTask={updateTask} />
         ) : (
           <TaskCalendarView tasks={tasks} updateTask={updateTask} />
         )}
       </div>
+
+      {/* Reassign Project Modal */}
+      <ReassignProjectModal
+        open={!!reassignTask}
+        onOpenChange={(open) => { if (!open) setReassignTask(null) }}
+        threadId={reassignTask?.emailLinks?.[0]?.email?.threadId ?? undefined}
+        taskId={!reassignTask?.emailLinks?.[0]?.email?.threadId ? reassignTask?.id : undefined}
+        currentProject={reassignTask?.project}
+        invalidateKeys={[['tasks']]}
+      />
 
       {/* Create Task Modal */}
       <Dialog open={showCreateModal} onOpenChange={handleModalOpenChange}>
@@ -318,7 +331,7 @@ export default function TasksPage() {
 }
 
 /* ========== LIST VIEW - 2-level collapsible: identity -> project ========== */
-function TaskListView({ tasks, updateTask, focusProjectId }: { tasks: TaskItem[]; updateTask: MutationLike; focusProjectId?: string }) {
+function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks: TaskItem[]; updateTask: MutationLike; focusProjectId?: string; onReassign: (task: TaskItem) => void }) {
   type ProjectGroup = { id: string; name: string; items: TaskItem[] }
   type IdentityGroup = { id: string; name: string; projects: ProjectGroup[] }
 
@@ -437,7 +450,7 @@ function TaskListView({ tasks, updateTask, focusProjectId }: { tasks: TaskItem[]
                       {!isProjectCollapsed && (
                         <div className="space-y-2 px-4 pb-3 pt-1">
                           {project.items.map((task) => (
-                            <TaskRow key={task.id} task={task} updateTask={updateTask} />
+                            <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} />
                           ))}
                         </div>
                       )}
@@ -459,7 +472,7 @@ function TaskListView({ tasks, updateTask, focusProjectId }: { tasks: TaskItem[]
           </div>
           <div className="space-y-2 border-t border-slate-100 px-4 pb-3 pt-2">
             {ungrouped.map((task) => (
-              <TaskRow key={task.id} task={task} updateTask={updateTask} />
+              <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} />
             ))}
           </div>
         </div>
@@ -468,7 +481,7 @@ function TaskListView({ tasks, updateTask, focusProjectId }: { tasks: TaskItem[]
   )
 }
 
-function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLike }) {
+function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask: MutationLike; onReassign: (task: TaskItem) => void }) {
   const band = getPriorityBand(task.priorityScore || 0)
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const isOverdue = deadline && new Date(deadline) < new Date() && (task.status === 'pending' || task.status === 'confirmed')
@@ -564,6 +577,13 @@ function TaskRow({ task, updateTask }: { task: TaskItem; updateTask: MutationLik
 
       {/* Quick actions - context-aware by status */}
       <div className={`flex items-center gap-1 ${isPending ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReassign(task) }}
+          title="Change project"
+          className="hidden group-hover:flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
+        </button>
         {isPending ? (
           <>
             {/* Pending: Confirm or Dismiss */}

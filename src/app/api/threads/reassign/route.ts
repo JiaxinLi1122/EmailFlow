@@ -5,10 +5,20 @@ export async function POST(req: Request) {
   try {
     const user = await getAuthUser()
 
-    const { threadId, projectId } = await req.json()
+    const {
+      threadId,
+      projectId,
+      includeThread = true,
+      taskIds,
+    }: {
+      threadId: string
+      projectId: string
+      includeThread?: boolean
+      taskIds?: string[]
+    } = await req.json()
+
     if (!threadId || !projectId) return error('BAD_REQUEST', 'threadId and projectId are required', 400)
 
-    // Verify project belongs to user
     const project = await prisma.projectContext.findFirst({
       where: { id: projectId, userId: user.id },
     })
@@ -31,20 +41,41 @@ export async function POST(req: Request) {
       })
     }
 
-    // Update or create ThreadMemory
-    await prisma.threadMemory.upsert({
-      where: { userId_threadId: { userId: user.id, threadId } },
-      update: { matterId: matter.id },
-      create: { userId: user.id, threadId, matterId: matter.id, title: project.name, summary: 'Manually assigned' },
-    })
+    const ops: Promise<unknown>[] = []
 
-    // Count affected items for confirmation display
-    const [affectedEmails, affectedTasks] = await Promise.all([
-      prisma.email.count({ where: { userId: user.id, threadId } }),
-      prisma.task.count({
-        where: { userId: user.id, emailLinks: { some: { email: { threadId } } } },
-      }),
-    ])
+    // Update ThreadMemory (affects all emails in thread)
+    if (includeThread) {
+      ops.push(
+        prisma.threadMemory.upsert({
+          where: { userId_threadId: { userId: user.id, threadId } },
+          update: { matterId: matter.id },
+          create: {
+            userId: user.id,
+            threadId,
+            matterId: matter.id,
+            title: project.name,
+            summary: 'Manually assigned',
+          },
+        })
+      )
+    }
+
+    // Explicitly set matterId on selected tasks
+    if (taskIds && taskIds.length > 0) {
+      ops.push(
+        prisma.task.updateMany({
+          where: { id: { in: taskIds }, userId: user.id },
+          data: { matterId: matter.id },
+        })
+      )
+    }
+
+    await Promise.all(ops)
+
+    const affectedEmails = includeThread
+      ? await prisma.email.count({ where: { userId: user.id, threadId } })
+      : 0
+    const affectedTasks = taskIds?.length ?? 0
 
     return success({ affectedEmails, affectedTasks })
   } catch (err) {

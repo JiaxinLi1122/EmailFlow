@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
 import { getEmailClassConfig } from '@/lib/email-classification'
+import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import { CACHE_TIME } from '@/lib/query-cache'
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,7 @@ export default function EmailsPage() {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [selectingStep, setSelectingStep] = useState<'from' | 'to'>('from')
   const [page, setPage] = useState(1)
+  const [reassignEmail, setReassignEmail] = useState<EmailItem | null>(null)
 
   // Sync batch — read batchId from sessionStorage (written by header after sync).
   // Lazy initializer runs once on the client; returns null during SSR.
@@ -523,6 +525,15 @@ export default function EmailsPage() {
         </div>
       )}
 
+      {/* Reassign Project Modal */}
+      <ReassignProjectModal
+        open={!!reassignEmail}
+        onOpenChange={(open) => { if (!open) setReassignEmail(null) }}
+        threadId={reassignEmail?.threadId ?? undefined}
+        currentProject={reassignEmail?.project}
+        invalidateKeys={[['emails']]}
+      />
+
       {/* Sync batch modal */}
       {showBatchModal && batchStatus && (
         <SyncBatchModal
@@ -545,7 +556,7 @@ export default function EmailsPage() {
           description={searchQuery ? 'Try adjusting your keywords or filters.' : 'Change the current filters to see more mail.'}
         />
       ) : (
-        <EmailMatterView emails={filtered} focusIdentityId={focusIdentityId} />
+        <EmailMatterView emails={filtered} focusIdentityId={focusIdentityId} onReassign={setReassignEmail} />
       )}
 
       {/* Pagination */}
@@ -652,7 +663,7 @@ function SyncBatchModal({
 type EmailProjectGroup = { id: string; name: string; items: EmailItem[] }
 type EmailIdentityGroup = { id: string; name: string; projects: EmailProjectGroup[] }
 
-function EmailMatterView({ emails, focusIdentityId }: { emails: EmailItem[]; focusIdentityId?: string }) {
+function EmailMatterView({ emails, focusIdentityId, onReassign }: { emails: EmailItem[]; focusIdentityId?: string; onReassign: (email: EmailItem) => void }) {
   const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
   const [userHasToggled, setUserHasToggled] = useState(false)
@@ -775,7 +786,7 @@ function EmailMatterView({ emails, focusIdentityId }: { emails: EmailItem[]; foc
                       {!isProjectCollapsed && (
                         <div className="space-y-1.5 px-4 pb-3 pt-1">
                           {project.items.map((email) => (
-                            <EmailRow key={email.id} email={email} />
+                            <EmailRow key={email.id} email={email} onReassign={onReassign} />
                           ))}
                         </div>
                       )}
@@ -797,7 +808,7 @@ function EmailMatterView({ emails, focusIdentityId }: { emails: EmailItem[]; foc
           </div>
           <div className="space-y-1.5 border-t border-slate-100 px-4 pb-3 pt-2">
             {ungrouped.map((email) => (
-              <EmailRow key={email.id} email={email} />
+              <EmailRow key={email.id} email={email} onReassign={onReassign} />
             ))}
           </div>
         </div>
@@ -808,7 +819,7 @@ function EmailMatterView({ emails, focusIdentityId }: { emails: EmailItem[]; foc
 
 
 /* ========== EMAIL ROW - shows linked tasks as badges ========== */
-function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
+function EmailRow({ email, compact, onReassign }: { email: EmailItem; compact?: boolean; onReassign?: (email: EmailItem) => void }) {
   const matter = email.matter ?? null
   const linkedTasks = email.taskLinks?.map((link) => link.task).filter((t): t is LinkedTask => t != null) || []
   const needsAttention =
@@ -816,7 +827,7 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
     linkedTasks.length === 0
 
   return (
-    <div className={`flex items-center gap-3 rounded-xl border border-gray-200/80 bg-white px-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-sm ${
+    <div className={`group flex items-center gap-3 rounded-xl border border-gray-200/80 bg-white px-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-sm ${
       compact ? 'py-2 opacity-75' : 'py-3'
     } ${needsAttention ? 'border-l-2 border-l-red-400' : ''}`}>
       <Link
@@ -862,6 +873,17 @@ function EmailRow({ email, compact }: { email: EmailItem; compact?: boolean }) {
             </Link>
           ))}
         </div>
+      )}
+
+      {/* Change project button (hover) */}
+      {onReassign && (
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReassign(email) }}
+          title="Change project"
+          className="hidden group-hover:flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
+        </button>
       )}
     </div>
   )

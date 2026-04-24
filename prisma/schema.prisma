@@ -160,8 +160,10 @@ model Task {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
   source             String      @default("manual")
+  matterId           String?
   user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   emailLinks         TaskEmail[]
+  matter             MatterMemory? @relation(fields: [matterId], references: [id], onDelete: SetNull)
 }
 
 model TaskEmail {
@@ -257,6 +259,7 @@ model MatterMemory {
   projectContextId    String?
   projectContext      ProjectContext? @relation(fields: [projectContextId], references: [id])
   threads             ThreadMemory[]
+  tasks               Task[]
 }
 
 model UserIdentity {
