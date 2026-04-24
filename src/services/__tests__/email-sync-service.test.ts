@@ -126,11 +126,11 @@ describe('syncEmailsPhase1 — guards', () => {
     await expect(syncEmailsPhase1('user-1')).rejects.toThrow('User not found')
   })
 
-  it('throws when Gmail is not connected', async () => {
+  it('throws when email is not connected', async () => {
     vi.mocked(userRepo.getUserSyncInfo).mockResolvedValue({
       ...DEFAULT_SYNC_INFO, gmailConnected: false,
     } as any)
-    await expect(syncEmailsPhase1('user-1')).rejects.toThrow('Gmail not connected')
+    await expect(syncEmailsPhase1('user-1')).rejects.toThrow('Email not connected')
   })
 
   it('throws when sync is disabled', async () => {
