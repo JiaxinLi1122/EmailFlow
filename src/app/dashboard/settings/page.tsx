@@ -354,7 +354,7 @@ export default function SettingsPage() {
               ) : gmailConnected ? (
                 <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Gmail connected</Badge>
               ) : (
-                <Badge variant="outline">Gmail not connected</Badge>
+                <Badge variant="outline">Email not connected</Badge>
               )}
             </div>
           </div>

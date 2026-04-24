@@ -46,7 +46,7 @@ const pillars = [
 ]
 
 const trustPoints = [
-  'Read-only Gmail access',
+  'Read-only email access',
   'Disconnect any time',
   'Built for people handling multiple projects at once',
 ]
@@ -247,7 +247,7 @@ export default function LandingPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">Start small</p>
                   <h2 className="mt-4 max-w-2xl text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
-                    Connect Gmail, review the first queue, and let the system organize the rest.
+                    Connect your email, review the first queue, and let the system organize the rest.
                   </h2>
                   <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
                     You do not need a new workflow. EmailFlow AI is here to make the one you already have easier to run.

@@ -103,7 +103,7 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
 
   const syncInfo = await userRepo.getUserSyncInfo(userId)
   if (!syncInfo) throw new Error('User not found')
-  if (!syncInfo.gmailConnected) throw new Error('Gmail not connected')
+  if (!syncInfo.gmailConnected) throw new AppError('SYNC_FAILED', 'Email not connected', 400)
   if (!syncInfo.syncEnabled) throw new Error('Email sync is disabled')
   if (syncInfo.emailProviderReauthRequired) {
     throw new AppError(
