@@ -12,7 +12,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { InlineNotice } from '@/components/inline-notice'
 import { UserRound, FolderOpen, Plus, Check, ChevronDown, ChevronRight, Mail, CheckSquare, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { showError } from '@/components/error-dialog'
@@ -105,7 +104,11 @@ export function ReassignProjectModal({
   const toggleIdentity = (key: string) =>
     setCollapsedIdentities((prev) => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
       return next
     })
 
@@ -452,7 +455,11 @@ export function ReassignProjectModal({
                       onChange={(e) => {
                         setSelectedTaskIds((prev) => {
                           const next = new Set(prev)
-                          e.target.checked ? next.add(task.id) : next.delete(task.id)
+                          if (e.target.checked) {
+                            next.add(task.id)
+                          } else {
+                            next.delete(task.id)
+                          }
                           return next
                         })
                       }}

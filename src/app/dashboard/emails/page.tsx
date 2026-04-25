@@ -96,6 +96,81 @@ const informationalPriority: Record<string, number> = {
   ignore: 1,
 }
 
+type FilterEmailsOptions = {
+  emails: EmailItem[]
+  tab: Tab
+  classification: string
+  accountFilter: string
+  searchQuery: string
+  dateRange?: DateRange
+}
+
+function filterEmails({
+  emails,
+  tab,
+  classification,
+  accountFilter,
+  searchQuery,
+  dateRange,
+}: FilterEmailsOptions) {
+  let result = emails
+
+  if (tab === 'actionable') {
+    result = result.filter((email) =>
+      email.classification === 'action' || (email.taskLinks?.length ?? 0) > 0
+    )
+  } else if (tab === 'informational') {
+    result = result.filter((email) => email.classification === 'awareness')
+  } else if (tab === 'uncertain') {
+    result = result.filter((email) => email.classification === 'uncertain')
+  }
+
+  if (classification !== 'all') {
+    result = result.filter((email) => email.classification === classification)
+  }
+
+  if (accountFilter !== 'all') {
+    result = result.filter((email) => email.accountEmail === accountFilter)
+  }
+
+  if (dateRange?.from) {
+    const from = new Date(dateRange.from)
+    from.setHours(0, 0, 0, 0)
+    result = result.filter((email) => new Date(email.receivedAt) >= from)
+  }
+
+  if (dateRange?.to) {
+    const to = new Date(dateRange.to)
+    to.setHours(23, 59, 59, 999)
+    result = result.filter((email) => new Date(email.receivedAt) <= to)
+  }
+
+  if (searchQuery.trim()) {
+    const query = searchQuery.toLowerCase()
+    result = result.filter((email) =>
+      email.subject?.toLowerCase().includes(query) ||
+      email.sender?.toLowerCase().includes(query) ||
+      email.bodyPreview?.toLowerCase().includes(query)
+    )
+  }
+
+  if (tab === 'informational') {
+    result = [...result].sort((a, b) => {
+      const rankDiff =
+        (informationalPriority[a.classification ?? ''] ?? 99) -
+        (informationalPriority[b.classification ?? ''] ?? 99)
+
+      if (rankDiff !== 0) {
+        return rankDiff
+      }
+
+      return new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+    })
+  }
+
+  return result
+}
+
 export default function EmailsPage() {
   const searchParams = useSearchParams()
   const focusIdentityId = searchParams.get('identity') ?? undefined
@@ -114,7 +189,11 @@ export default function EmailsPage() {
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
 
@@ -221,64 +300,14 @@ export default function EmailsPage() {
   }, [emails])
 
   // Client-side filtering: tab -> classification -> account -> search
-  const filtered = useMemo(() => {
-    let result = emails
-
-    if (tab === 'actionable') {
-      result = result.filter((e) =>
-        e.classification === 'action' || (e.taskLinks?.length ?? 0) > 0
-      )
-    } else if (tab === 'informational') {
-      result = result.filter((e) => e.classification === 'awareness')
-    } else if (tab === 'uncertain') {
-      result = result.filter((e) => e.classification === 'uncertain')
-    }
-
-    if (classification !== 'all') {
-      result = result.filter((e) => e.classification === classification)
-    }
-
-    if (accountFilter !== 'all') {
-      result = result.filter((e) => e.accountEmail === accountFilter)
-    }
-
-    // Date range filter
-    if (dateRange?.from) {
-      const from = new Date(dateRange.from)
-      from.setHours(0, 0, 0, 0)
-      result = result.filter((e) => new Date(e.receivedAt) >= from)
-    }
-    if (dateRange?.to) {
-      const to = new Date(dateRange.to)
-      to.setHours(23, 59, 59, 999)
-      result = result.filter((e) => new Date(e.receivedAt) <= to)
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter((e) =>
-        e.subject?.toLowerCase().includes(q) ||
-        e.sender?.toLowerCase().includes(q) ||
-        e.bodyPreview?.toLowerCase().includes(q)
-      )
-    }
-
-    if (tab === 'informational') {
-      result = [...result].sort((a, b) => {
-        const rankDiff =
-          (informationalPriority[a.classification ?? ''] ?? 99) -
-          (informationalPriority[b.classification ?? ''] ?? 99)
-
-        if (rankDiff !== 0) {
-          return rankDiff
-        }
-
-        return new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
-      })
-    }
-
-    return result
-  }, [emails, tab, classification, accountFilter, searchQuery, dateRange])
+  const filtered = filterEmails({
+    emails,
+    tab,
+    classification,
+    accountFilter,
+    searchQuery,
+    dateRange,
+  })
 
   // Kept for rollback; no longer used directly in render.
   // const { needsAttention, hasTaskEmails } = useMemo(() => { ... }, [filtered, tab])
