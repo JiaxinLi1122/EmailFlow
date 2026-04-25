@@ -23,11 +23,13 @@ type Project = { id: string; name: string; identity: Identity | null }
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  taskIds: string[]
+  ids: string[]
+  batchApiEndpoint?: string
+  entityLabel?: string
   onSuccess?: () => void
 }
 
-export function BatchReassignModal({ open, onOpenChange, taskIds, onSuccess }: Props) {
+export function BatchReassignModal({ open, onOpenChange, ids, batchApiEndpoint = '/api/tasks/batch', entityLabel = 'task', onSuccess }: Props) {
   const queryClient = useQueryClient()
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -136,15 +138,16 @@ export function BatchReassignModal({ open, onOpenChange, taskIds, onSuccess }: P
 
       if (!projectId) { toast.error('Please select or create a project'); return }
 
-      const res = await fetch('/api/tasks/batch', {
+      const res = await fetch(batchApiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: taskIds, action: 'reassign', projectId }),
+        body: JSON.stringify({ ids, action: 'reassign', projectId }),
       })
-      if (!res.ok) throw new Error('Failed to reassign tasks')
+      if (!res.ok) throw new Error(`Failed to reassign ${entityLabel}s`)
 
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      toast.success(`${taskIds.length} task${taskIds.length === 1 ? '' : 's'} moved to project`)
+      queryClient.invalidateQueries({ queryKey: ['emails'] })
+      toast.success(`${ids.length} ${entityLabel}${ids.length === 1 ? '' : 's'} moved to project`)
       onSuccess?.()
       handleClose(false)
     } catch (err) {
@@ -160,7 +163,7 @@ export function BatchReassignModal({ open, onOpenChange, taskIds, onSuccess }: P
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Change project for {taskIds.length} task{taskIds.length === 1 ? '' : 's'}</DialogTitle>
+          <DialogTitle>Change project for {ids.length} {entityLabel}{ids.length === 1 ? '' : 's'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">

@@ -33,6 +33,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { ReassignProjectModal } from '@/components/reassign-project-modal'
 import { BatchReassignModal } from '@/components/batch-reassign-modal'
+import { InlineEditableName } from '@/components/inline-editable-name'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import { showError } from '@/components/error-dialog'
@@ -195,6 +196,17 @@ export default function TasksPage() {
 
   const clearSelection = () => setSelectedIds(new Set())
 
+  const bulkToggle = useCallback((ids: string[], select: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (select) ids.forEach((id) => next.add(id))
+      else ids.forEach((id) => next.delete(id))
+      return next
+    })
+  }, [])
+
+  const selectAll = () => setSelectedIds(new Set(tasks.map((t) => t.id)))
+
   const handleDeleteTask = async (taskId: string) => {
     await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
     queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -274,6 +286,11 @@ export default function TasksPage() {
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-2.5 shadow-sm">
           <span className="text-sm font-medium text-blue-700">{selectedIds.size} selected</span>
+          {selectedIds.size < tasks.length && (
+            <button onClick={selectAll} className="text-xs text-blue-500 hover:text-blue-700 hover:underline">
+              Select all {tasks.length}
+            </button>
+          )}
           <div className="flex-1" />
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => batchOp('confirm')}>
             <ThumbsUp className="mr-1 h-3 w-3" /> Confirm
@@ -316,6 +333,7 @@ export default function TasksPage() {
             onDelete={handleDeleteTask}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
+            onBulkToggle={bulkToggle}
           />
         ) : viewMode === 'timeline' ? (
           <GanttTimeline tasks={tasks} updateTask={updateTask} />
@@ -338,7 +356,7 @@ export default function TasksPage() {
       <BatchReassignModal
         open={showBatchReassign}
         onOpenChange={setShowBatchReassign}
-        taskIds={[...selectedIds]}
+        ids={[...selectedIds]}
         onSuccess={clearSelection}
       />
 
@@ -403,7 +421,7 @@ export default function TasksPage() {
 }
 
 /* ========== LIST VIEW - 2-level collapsible: identity -> project ========== */
-function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete, selectedIds, onToggleSelect }: {
+function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete, selectedIds, onToggleSelect, onBulkToggle }: {
   tasks: TaskItem[]
   updateTask: MutationLike
   focusProjectId?: string
@@ -411,13 +429,35 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
   onDelete: (id: string) => void
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
+  onBulkToggle: (ids: string[], select: boolean) => void
 }) {
   type ProjectGroup = { id: string; name: string; items: TaskItem[] }
   type IdentityGroup = { id: string; name: string; projects: ProjectGroup[] }
 
+  const queryClient = useQueryClient()
   const [collapsedIdentities, setCollapsedIdentities] = useState<Set<string>>(new Set())
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
   const [userHasToggled, setUserHasToggled] = useState(false)
+
+  const renameProject = async (projectId: string, name: string) => {
+    await fetch(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['projects'] })
+  }
+
+  const renameIdentity = async (identityId: string, name: string) => {
+    await fetch(`/api/identities/${identityId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['identities'] })
+  }
 
   const toggleIdentity = (id: string) => {
     setUserHasToggled(true)
@@ -488,6 +528,10 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
     )
   }
 
+  const ungroupedIds = ungrouped.map((t) => t.id)
+  const allUngroupedSel = ungroupedIds.length > 0 && ungroupedIds.every((id) => selectedIds.has(id))
+  const someUngroupedSel = ungroupedIds.some((id) => selectedIds.has(id))
+
   return (
     <div className="space-y-2">
       {identityGroups.map((identity) => {
@@ -495,18 +539,34 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
           ? !identity.projects.some((p) => p.id === focusProjectId)
           : collapsedIdentities.has(identity.id)
         const totalCount = identity.projects.reduce((s, p) => s + p.items.length, 0)
+        const identityTaskIds = identity.projects.flatMap((p) => p.items.map((t) => t.id))
+        const allIdentitySel = identityTaskIds.length > 0 && identityTaskIds.every((id) => selectedIds.has(id))
+        const someIdentitySel = identityTaskIds.some((id) => selectedIds.has(id))
         return (
           <div key={identity.id} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
             {/* Identity row */}
-            <button
-              onClick={() => toggleIdentity(identity.id)}
-              className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-slate-50"
-            >
-              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${isIdentityCollapsed ? '-rotate-90' : ''}`} />
-              <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">{identity.name}</span>
-              <span className="ml-auto text-xs text-slate-400">{totalCount} task{totalCount !== 1 ? 's' : ''} shown</span>
-            </button>
+            <div className="group flex w-full items-center gap-2.5 px-4 py-3 transition-colors hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={allIdentitySel}
+                ref={(el) => { if (el) el.indeterminate = someIdentitySel && !allIdentitySel }}
+                onChange={() => onBulkToggle(identityTaskIds, !allIdentitySel)}
+                onClick={(e) => e.stopPropagation()}
+                className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${allIdentitySel || someIdentitySel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              />
+              <button
+                onClick={() => toggleIdentity(identity.id)}
+                className="flex flex-1 items-center gap-2 text-left transition-colors"
+              >
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${isIdentityCollapsed ? '-rotate-90' : ''}`} />
+                <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                {identity.id === '__unassigned__'
+                  ? <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">{identity.name}</span>
+                  : <InlineEditableName name={identity.name} className="text-xs font-semibold uppercase tracking-widest text-slate-500" onSave={(n) => renameIdentity(identity.id, n)} />
+                }
+                <span className="ml-auto text-xs text-slate-400">{totalCount} task{totalCount !== 1 ? 's' : ''} shown</span>
+              </button>
+            </div>
 
             {!isIdentityCollapsed && (
               <div className="divide-y divide-slate-100 border-t border-slate-100">
@@ -514,18 +574,31 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
                   const isProjectCollapsed = !userHasToggled && focusProjectId
                     ? project.id !== focusProjectId
                     : collapsedProjects.has(project.id)
+                  const projectTaskIds = project.items.map((t) => t.id)
+                  const allProjectSel = projectTaskIds.length > 0 && projectTaskIds.every((id) => selectedIds.has(id))
+                  const someProjectSel = projectTaskIds.some((id) => selectedIds.has(id))
                   return (
                     <div key={project.id}>
                       {/* Project row */}
-                      <button
-                        onClick={() => toggleProject(project.id)}
-                        className="flex w-full items-center gap-2.5 px-5 py-2.5 text-left transition-colors hover:bg-slate-50/70"
-                      >
-                        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform duration-150 ${isProjectCollapsed ? '-rotate-90' : ''}`} />
-                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span className="text-sm font-medium text-slate-700">{project.name}</span>
-                        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length}</span>
-                      </button>
+                      <div className="group flex w-full items-center gap-2.5 px-5 py-2.5 transition-colors hover:bg-slate-50/70">
+                        <input
+                          type="checkbox"
+                          checked={allProjectSel}
+                          ref={(el) => { if (el) el.indeterminate = someProjectSel && !allProjectSel }}
+                          onChange={() => onBulkToggle(projectTaskIds, !allProjectSel)}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${allProjectSel || someProjectSel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                        />
+                        <button
+                          onClick={() => toggleProject(project.id)}
+                          className="flex flex-1 items-center gap-2 text-left transition-colors"
+                        >
+                          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform duration-150 ${isProjectCollapsed ? '-rotate-90' : ''}`} />
+                          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <InlineEditableName name={project.name} className="text-sm font-medium text-slate-700" onSave={(n) => renameProject(project.id, n)} />
+                          <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length}</span>
+                        </button>
+                      </div>
 
                       {!isProjectCollapsed && (
                         <div className="space-y-2 px-4 pb-3 pt-1">
@@ -545,7 +618,14 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
 
       {ungrouped.length > 0 && (
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-          <div className="flex items-center gap-2.5 px-4 py-3">
+          <div className="group flex items-center gap-2.5 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={allUngroupedSel}
+              ref={(el) => { if (el) el.indeterminate = someUngroupedSel && !allUngroupedSel }}
+              onChange={() => onBulkToggle(ungroupedIds, !allUngroupedSel)}
+              className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${allUngroupedSel || someUngroupedSel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+            />
             <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
             <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Uncategorized</span>
             <span className="ml-auto text-xs text-slate-400">{ungrouped.length} task{ungrouped.length !== 1 ? 's' : ''}</span>
@@ -595,7 +675,7 @@ function TaskRow({ task, updateTask, onReassign, onDelete, isSelected, onToggleS
         checked={isSelected}
         onChange={(e) => { e.stopPropagation(); onToggleSelect(task.id) }}
         onClick={(e) => e.stopPropagation()}
-        className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600"
+        className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
       />
 
       {/* Priority indicator */}
