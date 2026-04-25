@@ -245,6 +245,14 @@ export async function updateTask(taskId: string, data: Prisma.TaskUpdateInput) {
   return prisma.task.update({ where: { id: taskId }, data })
 }
 
+export async function deleteTask(taskId: string, userId: string) {
+  return prisma.task.delete({ where: { id: taskId, userId } })
+}
+
+export async function deleteManyTasks(taskIds: string[], userId: string) {
+  return prisma.task.deleteMany({ where: { id: { in: taskIds }, userId } })
+}
+
 export async function findTasksByDateRange(
   userId: string,
   dateRange: { start: Date; end: Date }

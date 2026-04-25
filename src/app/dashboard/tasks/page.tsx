@@ -25,13 +25,14 @@ import { StatePanel } from '@/components/state-panel'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
-  Mail, Clock, ThumbsUp, Plus, Circle, CheckCircle2, FolderOpen,
+  Mail, Clock, ThumbsUp, Plus, FolderOpen, Trash2,
   ChevronDown, UserRound,
 } from 'lucide-react'
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { ReassignProjectModal } from '@/components/reassign-project-modal'
+import { BatchReassignModal } from '@/components/batch-reassign-modal'
 import { getPriorityBand, getPriorityColor, getPriorityLabel } from '@/types'
 import { toast } from 'sonner'
 import { showError } from '@/components/error-dialog'
@@ -99,7 +100,6 @@ const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
   { value: 'confirmed', label: 'Confirmed' },
   { value: 'completed', label: 'Completed' },
-  { value: 'dismissed', label: 'Dismissed' },
 ]
 
 export default function TasksPage() {
@@ -114,6 +114,8 @@ export default function TasksPage() {
   const [taskSummary, setTaskSummary] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
   const [reassignTask, setReassignTask] = useState<TaskItem | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBatchReassign, setShowBatchReassign] = useState(false)
   const queryClient = useQueryClient()
 
   // Fetch all tasks (no server-side status filter — we filter client-side for "all")
@@ -184,6 +186,37 @@ export default function TasksPage() {
     },
   })
 
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const handleDeleteTask = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['stats'] })
+    setSelectedIds((prev) => { const next = new Set(prev); next.delete(taskId); return next })
+    toast.success('Task deleted')
+  }
+
+  const batchOp = async (action: 'complete' | 'confirm' | 'delete') => {
+    const ids = [...selectedIds]
+    await fetch('/api/tasks/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action }),
+    })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['stats'] })
+    clearSelection()
+    const label = action === 'complete' ? 'completed' : action === 'confirm' ? 'confirmed' : 'deleted'
+    toast.success(`${ids.length} task${ids.length === 1 ? '' : 's'} ${label}`)
+  }
+
   const tasks = useMemo(() => ((res as QueryResponse<TaskItem[]>)?.data || []) as TaskItem[], [res])
 
   return (
@@ -237,6 +270,29 @@ export default function TasksPage() {
         </div>
       </div>
 
+      {/* Batch action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50/80 px-4 py-2.5 shadow-sm">
+          <span className="text-sm font-medium text-blue-700">{selectedIds.size} selected</span>
+          <div className="flex-1" />
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => batchOp('confirm')}>
+            <ThumbsUp className="mr-1 h-3 w-3" /> Confirm
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => batchOp('complete')}>
+            <Check className="mr-1 h-3 w-3" /> Mark Done
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setShowBatchReassign(true)}>
+            <FolderOpen className="h-3 w-3" /> Change Project
+          </Button>
+          <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => batchOp('delete')}>
+            <Trash2 className="mr-1 h-3 w-3" /> Delete
+          </Button>
+          <button onClick={clearSelection} className="ml-1 rounded p-1 text-blue-400 hover:bg-blue-100 hover:text-blue-600">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Content */}
       <div className="min-w-0">
         {isLoading ? (
@@ -252,7 +308,15 @@ export default function TasksPage() {
             description="Try a different filter or create a task manually."
           />
         ) : viewMode === 'list' ? (
-          <TaskListView tasks={tasks} updateTask={updateTask} focusProjectId={focusProjectId} onReassign={setReassignTask} />
+          <TaskListView
+            tasks={tasks}
+            updateTask={updateTask}
+            focusProjectId={focusProjectId}
+            onReassign={setReassignTask}
+            onDelete={handleDeleteTask}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+          />
         ) : viewMode === 'timeline' ? (
           <GanttTimeline tasks={tasks} updateTask={updateTask} />
         ) : (
@@ -268,6 +332,14 @@ export default function TasksPage() {
         taskId={!reassignTask?.emailLinks?.[0]?.email?.threadId ? reassignTask?.id : undefined}
         currentProject={reassignTask?.project}
         invalidateKeys={[['tasks']]}
+      />
+
+      {/* Batch Reassign Modal */}
+      <BatchReassignModal
+        open={showBatchReassign}
+        onOpenChange={setShowBatchReassign}
+        taskIds={[...selectedIds]}
+        onSuccess={clearSelection}
       />
 
       {/* Create Task Modal */}
@@ -331,7 +403,15 @@ export default function TasksPage() {
 }
 
 /* ========== LIST VIEW - 2-level collapsible: identity -> project ========== */
-function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks: TaskItem[]; updateTask: MutationLike; focusProjectId?: string; onReassign: (task: TaskItem) => void }) {
+function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete, selectedIds, onToggleSelect }: {
+  tasks: TaskItem[]
+  updateTask: MutationLike
+  focusProjectId?: string
+  onReassign: (task: TaskItem) => void
+  onDelete: (id: string) => void
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
+}) {
   type ProjectGroup = { id: string; name: string; items: TaskItem[] }
   type IdentityGroup = { id: string; name: string; projects: ProjectGroup[] }
 
@@ -360,8 +440,8 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks
   }
 
   const sortItemsWithinGroup = useCallback((items: TaskItem[]) => {
-    const active = items.filter((task) => task.status !== 'completed' && task.status !== 'dismissed')
-    const done = items.filter((task) => task.status === 'completed' || task.status === 'dismissed')
+    const active = items.filter((task) => task.status !== 'completed')
+    const done = items.filter((task) => task.status === 'completed')
     return [...active, ...done]
   }, [])
 
@@ -450,7 +530,7 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks
                       {!isProjectCollapsed && (
                         <div className="space-y-2 px-4 pb-3 pt-1">
                           {project.items.map((task) => (
-                            <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} />
+                            <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} onDelete={onDelete} isSelected={selectedIds.has(task.id)} onToggleSelect={onToggleSelect} />
                           ))}
                         </div>
                       )}
@@ -472,7 +552,7 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks
           </div>
           <div className="space-y-2 border-t border-slate-100 px-4 pb-3 pt-2">
             {ungrouped.map((task) => (
-              <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} />
+              <TaskRow key={task.id} task={task} updateTask={updateTask} onReassign={onReassign} onDelete={onDelete} isSelected={selectedIds.has(task.id)} onToggleSelect={onToggleSelect} />
             ))}
           </div>
         </div>
@@ -481,51 +561,42 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign }: { tasks
   )
 }
 
-function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask: MutationLike; onReassign: (task: TaskItem) => void }) {
+function TaskRow({ task, updateTask, onReassign, onDelete, isSelected, onToggleSelect }: {
+  task: TaskItem
+  updateTask: MutationLike
+  onReassign: (task: TaskItem) => void
+  onDelete: (id: string) => void
+  isSelected: boolean
+  onToggleSelect: (id: string) => void
+}) {
   const band = getPriorityBand(task.priorityScore || 0)
   const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
   const isOverdue = deadline && new Date(deadline) < new Date() && (task.status === 'pending' || task.status === 'confirmed')
   const senderName = task.emailLinks?.[0]?.email?.sender?.split('<')[0]?.trim()
   const isPending = task.status === 'pending'
-  const isDone = task.status === 'completed' || task.status === 'dismissed'
+  const isDone = task.status === 'completed'
   const matter = task.matter ?? null
-
-  const handleComplete = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const prevStatus = task.status
-    updateTask.mutate({ id: task.id, data: { status: 'completed' } })
-    toast.success('Task completed', {
-      action: {
-        label: 'Undo',
-        onClick: () => updateTask.mutate({ id: task.id, data: { status: prevStatus } }),
-      },
-    })
-  }
 
   return (
     <div
       className={`group flex items-center gap-3 rounded-xl border px-3 transition-all ${
-        isPending
+        isSelected
+          ? 'border-blue-300 bg-blue-50/50 py-3.5'
+          : isPending
           ? 'border-purple-200 bg-purple-50/30 hover:border-purple-300 hover:shadow-md py-3.5'
           : isDone
           ? 'border-gray-100 bg-gray-50/50 py-2.5 opacity-60 hover:opacity-80'
           : 'border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/60 hover:shadow-sm py-3.5'
       }`}
     >
-      {/* Quick-complete checkbox */}
-      <button
-        onClick={handleComplete}
-        disabled={isDone}
-        title={isDone ? 'Already done' : 'Mark complete'}
-        className="shrink-0 p-1 rounded-full transition-colors hover:bg-green-50 disabled:cursor-default disabled:opacity-40"
-      >
-        {isDone ? (
-          <CheckCircle2 className="h-5 w-5 text-green-400" />
-        ) : (
-          <Circle className="h-5 w-5 text-gray-300 group-hover:text-green-400 transition-colors" />
-        )}
-      </button>
+      {/* Multi-select checkbox */}
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={(e) => { e.stopPropagation(); onToggleSelect(task.id) }}
+        onClick={(e) => e.stopPropagation()}
+        className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600"
+      />
 
       {/* Priority indicator */}
       <div className={`h-9 w-1 shrink-0 rounded-full ${
@@ -547,7 +618,6 @@ function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask:
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
             task.status === 'completed' ? 'bg-green-100 text-green-700' :
             task.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
-            task.status === 'dismissed' ? 'bg-gray-100 text-gray-500' :
             'bg-purple-100 text-purple-700'
           }`}>
             {task.status}
@@ -575,7 +645,7 @@ function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask:
         </div>
       </div>
 
-      {/* Quick actions - context-aware by status */}
+      {/* Quick actions */}
       <div className={`flex items-center gap-1 ${isPending ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReassign(task) }}
@@ -586,7 +656,6 @@ function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask:
         </button>
         {isPending ? (
           <>
-            {/* Pending: Confirm or Dismiss */}
             <button
               className="flex items-center justify-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors min-w-[4.5rem]"
               onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'confirmed' } }); toast.success('Task confirmed') }}
@@ -595,42 +664,37 @@ function TaskRow({ task, updateTask, onReassign }: { task: TaskItem; updateTask:
               Confirm
             </button>
             <button
-              className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
-              onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'dismissed' } }); toast('Task dismissed') }}
+              className="flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(task.id) }}
             >
-              <X className="h-3.5 w-3.5" />
-              Dismiss
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
             </button>
           </>
-        ) : (
+        ) : task.status === 'confirmed' ? (
           <>
-            {/* Confirmed: Done, Dismiss, Open */}
-            {task.status === 'confirmed' && (
-              <button
-                className="flex items-center justify-center gap-1 rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors min-w-[4.5rem]"
-                onClick={() => {
-                  const prevStatus = task.status
-                  updateTask.mutate({ id: task.id, data: { status: 'completed' } })
-                  toast.success('Task completed', {
-                    action: { label: 'Undo', onClick: () => updateTask.mutate({ id: task.id, data: { status: prevStatus } }) },
-                  })
-                }}
-              >
-                <Check className="h-3.5 w-3.5" />
-                Done
-              </button>
-            )}
-            {task.status !== 'dismissed' && task.status !== 'completed' && (
-              <button
-                className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
-                onClick={() => { updateTask.mutate({ id: task.id, data: { status: 'dismissed' } }); toast('Task dismissed') }}
-              >
-                <X className="h-3.5 w-3.5" />
-                Dismiss
-              </button>
-            )}
+            <button
+              className="flex items-center justify-center gap-1 rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors min-w-[4.5rem]"
+              onClick={() => {
+                const prevStatus = task.status
+                updateTask.mutate({ id: task.id, data: { status: 'completed' } })
+                toast.success('Task completed', {
+                  action: { label: 'Undo', onClick: () => updateTask.mutate({ id: task.id, data: { status: prevStatus } }) },
+                })
+              }}
+            >
+              <Check className="h-3.5 w-3.5" />
+              Done
+            </button>
+            <button
+              className="flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(task.id) }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </button>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   )

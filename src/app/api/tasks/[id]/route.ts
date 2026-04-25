@@ -32,6 +32,23 @@ export async function GET(
   }
 }
 
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const user = await getAuthUser()
+    const { id } = await params
+    const existing = await taskRepo.findTaskById(user.id, id)
+    if (!existing) return error('NOT_FOUND', 'Task not found', 404)
+    await taskRepo.deleteTask(id, user.id)
+    invalidateStatsCache(user.id)
+    return success({ deleted: true })
+  } catch (err) {
+    return errorFromException(err, 'INTERNAL_ERROR', 'Failed to delete task', 500)
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
