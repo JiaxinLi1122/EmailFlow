@@ -31,7 +31,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { useState, useMemo, useCallback } from 'react'
+import { Suspense, useState, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
 import { ReassignProjectModal } from '@/components/reassign-project-modal'
@@ -108,6 +108,14 @@ const STATUS_OPTIONS = [
 ]
 
 export default function TasksPage() {
+  return (
+    <Suspense fallback={null}>
+      <TasksContent />
+    </Suspense>
+  )
+}
+
+function TasksContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const focusProjectId = searchParams.get('project') ?? undefined

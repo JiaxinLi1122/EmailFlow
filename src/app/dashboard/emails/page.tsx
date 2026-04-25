@@ -17,7 +17,7 @@ import {
   CheckSquare, Paperclip, Mail,
   Search, CalendarIcon, X, ChevronDown, UserRound, FolderOpen, Loader2, Zap,
 } from 'lucide-react'
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Suspense, useState, useMemo, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Calendar } from '@/components/ui/calendar'
@@ -172,6 +172,14 @@ function filterEmails({
 }
 
 export default function EmailsPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmailsContent />
+    </Suspense>
+  )
+}
+
+function EmailsContent() {
   const searchParams = useSearchParams()
   const focusIdentityId = searchParams.get('identity') ?? undefined
   const [tab, setTab] = useState<Tab>('actionable')

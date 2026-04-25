@@ -1,11 +1,25 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireCurrentSessionContext } from '@/lib/auth-session'
 import { errorFromException } from '@/lib/api-helpers'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const context = await requireCurrentSessionContext()
+    const includeDetails = request.nextUrl.searchParams.get('details') === 'full'
+
+    if (!includeDetails) {
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: context.user.id,
+          email: context.user.email,
+          name: context.user.name,
+          isAdmin: context.user.isAdmin,
+          currentSessionId: context.session.id,
+        },
+      })
+    }
 
     const [user, googleAccount] = await Promise.all([
       prisma.user.findUnique({

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -83,6 +83,14 @@ type DashboardSummaryResponse = {
 }
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardPageFallback />}>
+      <DashboardContent />
+    </Suspense>
+  )
+}
+
+function DashboardContent() {
   const { user } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -613,6 +621,35 @@ export default function DashboardPage() {
 }
 
 /* ========== SKELETON COMPONENTS ========== */
+
+function DashboardPageFallback() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-4 w-64" />
+        </div>
+        <Skeleton className="h-9 w-28 rounded-lg" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ListCardSkeleton />
+        <ListCardSkeleton />
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <ChartCardSkeleton />
+        <ChartCardSkeleton />
+        <ChartCardSkeleton />
+      </div>
+    </div>
+  )
+}
 
 function StatCardSkeleton() {
   return (

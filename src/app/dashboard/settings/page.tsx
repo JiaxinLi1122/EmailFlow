@@ -172,7 +172,7 @@ export default function SettingsPage() {
 
   const { data: meRes } = useQuery({
     queryKey: ['auth-me'],
-    queryFn: () => fetch('/api/auth/me').then((r) => r.json()),
+    queryFn: () => fetch('/api/auth/me?details=full').then((r) => r.json()),
     staleTime: CACHE_TIME.auth,
   })
 
