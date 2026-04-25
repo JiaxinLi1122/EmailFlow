@@ -1,4 +1,4 @@
-import { createAnthropic } from '@ai-sdk/anthropic'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 
 // ============================================================
@@ -6,17 +6,17 @@ import { createOpenAI } from '@ai-sdk/openai'
 // Change model or provider here — everything else stays the same
 // ============================================================
 
-const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' })
+const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '' })
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY || '' })
 
 // Model tiers — pick the right cost/quality tradeoff per task
 const models = {
   // Fast + cheap: classification, priority scoring
-  fast: anthropic('claude-haiku-4-5-20251001'),
+  fast: google('gemini-2.5-flash'),
   // Balanced: task extraction, digest generation
-  balanced: anthropic('claude-sonnet-4-6-20250610'),
+  balanced: google('gemini-2.5-flash'),
   // Best quality: complex reasoning (not used in MVP)
-  powerful: anthropic('claude-opus-4-6-20250610'),
+  powerful: google('gemini-2.5-flash'),
 } as const
 
 // Fallback models if primary provider is down

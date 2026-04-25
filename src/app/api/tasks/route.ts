@@ -37,22 +37,47 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser()
 
-    const { title, summary } = await req.json()
+    const { title, summary, actionItems, userSetDeadline, urgency, impact, priorityScore, projectId, source } = await req.json()
 
     if (!title) {
       return error('BAD_REQUEST', 'Title is required', 400)
     }
 
-    // Create task with default values
+    // If projectId provided, find or create a MatterMemory to link the task
+    let matterId: string | undefined
+    if (projectId) {
+      const project = await prisma.projectContext.findFirst({ where: { id: projectId, userId: user.id } })
+      if (project) {
+        let matter = await prisma.matterMemory.findFirst({ where: { userId: user.id, projectContextId: projectId } })
+        if (!matter) {
+          matter = await prisma.matterMemory.create({
+            data: {
+              userId: user.id,
+              projectContextId: projectId,
+              title: project.name,
+              summary: 'Manually assigned to this project',
+              status: 'open',
+              topic: 'other',
+            },
+          })
+        }
+        matterId = matter.id
+      }
+    }
+
     const task = await prisma.task.create({
       data: {
         userId: user.id,
         title,
         summary: summary || '',
         status: 'pending',
-        urgency: 3,
-        impact: 3,
-        priorityScore: 9,
+        urgency: urgency ?? 3,
+        impact: impact ?? 3,
+        priorityScore: priorityScore ?? 9,
+        actionItems: actionItems ?? '[]',
+        userSetDeadline: userSetDeadline ? new Date(userSetDeadline) : undefined,
+        source: source ?? 'manual',
+        matterId,
       },
     })
 

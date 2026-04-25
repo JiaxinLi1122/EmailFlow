@@ -26,8 +26,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Check, X, Calendar, List, GanttChart, ChevronLeft, ChevronRight,
   Mail, Clock, ThumbsUp, Plus, FolderOpen, Trash2,
-  ChevronDown, UserRound,
+  ChevronDown, UserRound, Sparkles,
 } from 'lucide-react'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GanttTimeline } from '@/components/gantt-timeline'
@@ -67,6 +70,7 @@ type TaskItem = {
   emailLinks?: TaskEmailLink[]
   project?: TaskProject
   matter?: { id: string; title: string } | null
+  source?: string | null
 }
 
 type TaskUpdateData = {
@@ -117,6 +121,17 @@ export default function TasksPage() {
   const [reassignTask, setReassignTask] = useState<TaskItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showBatchReassign, setShowBatchReassign] = useState(false)
+  // Extract-from-text state
+  const [showExtract, setShowExtract] = useState(false)
+  const [extractText, setExtractText] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [draftActionItems, setDraftActionItems] = useState<string[]>([])
+  const [draftDeadline, setDraftDeadline] = useState('')
+  const [draftUrgency, setDraftUrgency] = useState(3)
+  const [draftImpact, setDraftImpact] = useState(3)
+  const [draftPriorityScore, setDraftPriorityScore] = useState(9)
+  const [draftSource, setDraftSource] = useState('manual')
+  const [selectedProjectId, setSelectedProjectId] = useState('')
   const queryClient = useQueryClient()
 
   // Fetch all tasks (no server-side status filter — we filter client-side for "all")
@@ -129,12 +144,61 @@ export default function TasksPage() {
     placeholderData: (previous) => previous,
   })
 
+  const { data: projectsRes } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => fetch('/api/projects').then((r) => r.json()),
+    staleTime: CACHE_TIME.list,
+  })
+  const projects: { id: string; name: string; identity: { name: string } | null }[] = projectsRes?.data ?? []
+
+
+  const resetCreateModal = () => {
+    setTaskTitle('')
+    setTaskSummary('')
+    setShowExtract(false)
+    setExtractText('')
+    setExtracting(false)
+    setDraftActionItems([])
+    setDraftDeadline('')
+    setDraftUrgency(3)
+    setDraftImpact(3)
+    setDraftPriorityScore(9)
+    setDraftSource('manual')
+    setSelectedProjectId('')
+  }
 
   const handleModalOpenChange = (open: boolean) => {
     setShowCreateModal(open)
-    if (!open) {
-      setTaskTitle('')
-      setTaskSummary('')
+    if (!open) resetCreateModal()
+  }
+
+  const handleGenerateTask = async () => {
+    if (!extractText.trim()) return
+    setExtracting(true)
+    try {
+      const res = await fetch('/api/tasks/from-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: extractText }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const draft = data.data
+        setTaskTitle(draft.title || '')
+        setTaskSummary(draft.summary || '')
+        setDraftActionItems(draft.actionItems || [])
+        setDraftDeadline(draft.explicitDeadline || draft.inferredDeadline || '')
+        setDraftUrgency(draft.urgency || 3)
+        setDraftImpact(draft.impact || 3)
+        setDraftPriorityScore(draft.priorityScore || 9)
+        setDraftSource('copy_text')
+      } else {
+        showError('Failed to extract task')
+      }
+    } catch {
+      showError('Failed to extract task')
+    } finally {
+      setExtracting(false)
     }
   }
 
@@ -152,6 +216,13 @@ export default function TasksPage() {
         body: JSON.stringify({
           title: taskTitle,
           summary: taskSummary,
+          actionItems: draftActionItems.length > 0 ? JSON.stringify(draftActionItems) : undefined,
+          userSetDeadline: draftDeadline || undefined,
+          urgency: draftUrgency,
+          impact: draftImpact,
+          priorityScore: draftPriorityScore,
+          source: draftSource,
+          projectId: selectedProjectId || undefined,
         }),
       })
 
@@ -160,9 +231,7 @@ export default function TasksPage() {
         queryClient.invalidateQueries({ queryKey: ['tasks'] })
         toast.success('Task created')
         setShowCreateModal(false)
-        setTaskTitle('')
-        setTaskSummary('')
-        // Navigate to the new task
+        resetCreateModal()
         router.push(`/dashboard/tasks/${data.data.id}`)
       } else {
         showError('Failed to create task')
@@ -375,9 +444,47 @@ export default function TasksPage() {
           </DialogHeader>
 
           <div className="mt-1 space-y-4">
+            {/* Extract from text section */}
+            <div className="rounded-lg border border-dashed border-border bg-muted/30">
+              <button
+                type="button"
+                onClick={() => setShowExtract((v) => !v)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Sparkles className="size-3.5" />
+                <span>Extract from text</span>
+                <ChevronDown className={`ml-auto size-3.5 transition-transform ${showExtract ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showExtract && (
+                <div className="border-t border-dashed border-border px-3 pb-3 pt-2 space-y-2">
+                  <Textarea
+                    value={extractText}
+                    onChange={(e) => setExtractText(e.target.value.slice(0, 1000))}
+                    placeholder="Paste meeting notes, chat messages, or any text..."
+                    rows={4}
+                    className="resize-none text-sm"
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">{extractText.length}/1000</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleGenerateTask}
+                      disabled={extracting || !extractText.trim()}
+                    >
+                      <Sparkles className="size-3.5 mr-1.5" />
+                      {extracting ? 'Generating...' : 'Generate Task'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {!taskTitle.trim() && creatingTask ? (
               <InlineNotice variant="warning">A task title is required before you can create it.</InlineNotice>
             ) : null}
+
             <div className="space-y-2">
               <Label htmlFor="manual-task-title">Task Title</Label>
               <Input
@@ -402,6 +509,114 @@ export default function TasksPage() {
                 className="resize-none"
               />
             </div>
+
+            {/* Project picker */}
+            {projects.length > 0 && (
+              <div className="space-y-2">
+                <Label>Project <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Select value={selectedProjectId} onValueChange={(v) => setSelectedProjectId(v ?? '')}>
+                  <SelectTrigger className="h-9 w-full text-sm">
+                    <SelectValue placeholder="Link to a project..." />
+                  </SelectTrigger>
+                  <SelectContent className="w-full">
+                    {projects.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        <div className="flex flex-col py-0.5">
+                          <span className="font-medium">{p.name}</span>
+                          {p.identity && (
+                            <span className="text-xs text-muted-foreground">{p.identity.name}</span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Checklist — shown when items exist */}
+            {draftActionItems.length > 0 && (
+              <div className="space-y-2">
+                <Label>Checklist</Label>
+                <div className="space-y-1.5">
+                  {draftActionItems.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={item}
+                        onChange={(e) => {
+                          const next = [...draftActionItems]
+                          next[i] = e.target.value
+                          setDraftActionItems(next)
+                        }}
+                        className="h-8 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setDraftActionItems(draftActionItems.filter((_, j) => j !== i))}
+                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDraftActionItems([...draftActionItems, ''])}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="size-3.5" /> Add item
+                </button>
+              </div>
+            )}
+
+            {/* Deadline + Priority — shown when set by AI */}
+            {(draftDeadline || draftPriorityScore !== 9) && (
+              <div className="flex gap-3">
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="draft-deadline">Deadline</Label>
+                  <Input
+                    id="draft-deadline"
+                    type="date"
+                    value={draftDeadline}
+                    onChange={(e) => setDraftDeadline(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select
+                    value={(() => {
+                      if (draftPriorityScore >= 20) return 'critical'
+                      if (draftPriorityScore >= 12) return 'high'
+                      if (draftPriorityScore >= 6) return 'medium'
+                      return 'low'
+                    })()}
+                    onValueChange={(v) => {
+                      if (!v) return
+                      const map: Record<string, { urgency: number; impact: number; score: number }> = {
+                        critical: { urgency: 5, impact: 4, score: 20 },
+                        high: { urgency: 4, impact: 4, score: 16 },
+                        medium: { urgency: 3, impact: 3, score: 9 },
+                        low: { urgency: 2, impact: 2, score: 4 },
+                      }
+                      const p = map[v]
+                      if (p) { setDraftUrgency(p.urgency); setDraftImpact(p.impact); setDraftPriorityScore(p.score) }
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="critical">Critical</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="mt-2">
@@ -699,6 +914,11 @@ function TaskRow({ task, updateTask, onReassign, onDelete, isSelected, onToggleS
           <Badge variant="outline" className={`shrink-0 text-[10px] ${getPriorityColor(band)}`}>
             {getPriorityLabel(band)}
           </Badge>
+          {task.source === 'copy_text' && (
+            <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-600">
+              Copy Text
+            </span>
+          )}
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
             task.status === 'completed' ? 'bg-green-100 text-green-700' :
             task.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
