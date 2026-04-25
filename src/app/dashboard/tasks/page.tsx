@@ -773,9 +773,17 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
                 onClick={(e) => e.stopPropagation()}
                 className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${allIdentitySel || someIdentitySel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
               />
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => toggleIdentity(identity.id)}
-                className="flex flex-1 items-center gap-2 text-left transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    toggleIdentity(identity.id)
+                  }
+                }}
+                className="flex flex-1 cursor-pointer items-center gap-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-150 ${isIdentityCollapsed ? '-rotate-90' : ''}`} />
                 <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -784,7 +792,7 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
                   : <InlineEditableName name={identity.name} className="text-xs font-semibold uppercase tracking-widest text-slate-500" onSave={(n) => renameIdentity(identity.id, n)} />
                 }
                 <span className="ml-auto text-xs text-slate-400">{totalCount} task{totalCount !== 1 ? 's' : ''} shown</span>
-              </button>
+              </div>
             </div>
 
             {!isIdentityCollapsed && (
@@ -808,15 +816,23 @@ function TaskListView({ tasks, updateTask, focusProjectId, onReassign, onDelete,
                           onClick={(e) => e.stopPropagation()}
                           className={`h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 accent-blue-600 transition-opacity ${allProjectSel || someProjectSel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                         />
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => toggleProject(project.id)}
-                          className="flex flex-1 items-center gap-2 text-left transition-colors"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              toggleProject(project.id)
+                            }
+                          }}
+                          className="flex flex-1 cursor-pointer items-center gap-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                         >
                           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform duration-150 ${isProjectCollapsed ? '-rotate-90' : ''}`} />
                           <FolderOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                           <InlineEditableName name={project.name} className="text-sm font-medium text-slate-700" onSave={(n) => renameProject(project.id, n)} />
                           <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{project.items.length}</span>
-                        </button>
+                        </div>
                       </div>
 
                       {!isProjectCollapsed && (

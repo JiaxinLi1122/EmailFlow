@@ -56,7 +56,7 @@ type DashboardContextCount = {
 
 type DashboardSummary = {
   stats: {
-    emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number }
+    emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number; linkedAction: number }
     tasks: { total: number; pending: number; confirmed: number; completed: number; dismissed: number }
     sync: {
       lastSyncAt?: string | null
@@ -142,8 +142,8 @@ export default function DashboardPage() {
   const confirmedTaskCount = summary?.tasks.confirmedCount ?? 0
   const dismissedTaskCount = summary?.tasks.dismissedCount ?? 0
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
-  const emailData = s?.emails ?? { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 }
-  const actionToTask = emailData.action > 0 ? Math.round((totalTasks / emailData.action) * 100) : 0
+  const emailData = s?.emails ?? { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0, linkedAction: 0 }
+  const actionToTask = emailData.action > 0 ? Math.round((emailData.linkedAction / emailData.action) * 100) : 0
   const confirmedTasks = summary?.tasks.confirmedPreview ?? []
   const pendingTasks = summary?.tasks.pendingPreview ?? []
   const attentionEmails = summary?.attentionEmails ?? []
@@ -316,7 +316,7 @@ export default function DashboardPage() {
                 <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2">
                   <Target className="h-3.5 w-3.5 text-blue-600" />
                   <span className="text-xs text-blue-700">
-                    AI extraction rate: <strong>{actionToTask}%</strong> of action emails to tasks
+                    AI extraction rate: <strong>{actionToTask}%</strong> of action emails with tasks
                   </span>
                 </div>
               </CardContent>

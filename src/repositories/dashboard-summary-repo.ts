@@ -9,7 +9,7 @@ type PriorityCounts = {
 }
 
 type DashboardStats = {
-  emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number }
+  emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number; linkedAction: number }
   tasks: { total: number; pending: number; confirmed: number; completed: number; dismissed: number }
   sync: {
     lastSyncAt: Date | null | undefined
@@ -23,11 +23,18 @@ type DashboardStats = {
 }
 
 export async function getDashboardSummary(userId: string) {
-  const [emailGroups, taskGroups, userInfo, tasks, attentionEmails, activeMatters] = await Promise.all([
+  const [emailGroups, linkedActionEmails, taskGroups, userInfo, tasks, attentionEmails, activeMatters] = await Promise.all([
     prisma.email.groupBy({
       by: ['classification'],
       where: { userId },
       _count: { id: true },
+    }),
+    prisma.email.count({
+      where: {
+        userId,
+        classification: 'action',
+        taskLinks: { some: {} },
+      },
     }),
     prisma.task.groupBy({
       by: ['status'],
@@ -101,7 +108,7 @@ export async function getDashboardSummary(userId: string) {
     }),
   ])
 
-  const stats = buildStats(emailGroups, taskGroups, userInfo)
+  const stats = buildStats(emailGroups, linkedActionEmails, taskGroups, userInfo)
   const taskSummary = buildTaskSummary(tasks, stats.tasks)
   const { activeIdentities, activeProjects } = buildActiveContexts(activeMatters)
 
@@ -116,6 +123,7 @@ export async function getDashboardSummary(userId: string) {
 
 function buildStats(
   emailGroups: Array<{ classification: string | null; _count: { id: number } }>,
+  linkedActionEmails: number,
   taskGroups: Array<{ status: string; _count: { id: number } }>,
   userInfo: {
     lastSyncAt: Date | null
@@ -146,6 +154,7 @@ function buildStats(
       awareness: emailCount('awareness'),
       ignore: emailCount('ignore'),
       uncertain: emailCount('uncertain'),
+      linkedAction: linkedActionEmails,
     },
     tasks: {
       total: taskTotal,
