@@ -8,6 +8,7 @@ export const CACHE_TIME = {
 
 export const WORKSPACE_QUERY_ROOTS = [
   'stats',
+  'dashboard-summary',
   'matters',
   'tasks',
   'task',

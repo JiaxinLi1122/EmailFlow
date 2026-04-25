@@ -164,6 +164,10 @@ model Task {
   user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   emailLinks         TaskEmail[]
   matter             MatterMemory? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, priorityScore(sort: Desc)])
+  @@index([userId, priorityScore(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model TaskEmail {
@@ -175,6 +179,7 @@ model TaskEmail {
   task         Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, emailId])
+  @@index([emailId])
 }
 
 model Digest {
@@ -260,6 +265,9 @@ model MatterMemory {
   projectContext      ProjectContext? @relation(fields: [projectContextId], references: [id])
   threads             ThreadMemory[]
   tasks               Task[]
+
+  @@index([userId, lastMessageAt(sort: Desc)])
+  @@index([userId, status, lastMessageAt(sort: Desc)])
 }
 
 model UserIdentity {
@@ -343,6 +351,8 @@ model ThreadMemory {
   matter             MatterMemory? @relation(fields: [matterId], references: [id])
 
   @@unique([userId, threadId])
+  @@index([matterId])
+  @@index([userId, matterId])
 }
 
 model Attachment {

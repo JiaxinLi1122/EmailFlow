@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/use-auth'
 import { ApiClientError, isSessionFailureCode } from '@/lib/api-client'
 import {
@@ -44,7 +44,6 @@ export function Header() {
   const { user, logout } = useAuth()
   const queryClient = useQueryClient()
   const pathname = usePathname()
-  const router = useRouter()
   const [syncResult, setSyncResult] = useState<SyncResultData | null>(null)
   const [syncResultOpen, setSyncResultOpen] = useState(false)
 
@@ -81,7 +80,6 @@ export function Header() {
         predicate: (query) => isWorkspaceQueryKey(query.queryKey),
         type: 'active',
       })
-      router.refresh()
 
       const syncData = data?.data as {
         syncedCount: number
@@ -120,7 +118,6 @@ export function Header() {
             predicate: (query) => isWorkspaceQueryKey(query.queryKey),
             type: 'active',
           })
-          router.refresh()
         }, PROCESSING_REFETCH_DELAY_MS)
       }
     },

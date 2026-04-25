@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -46,22 +46,40 @@ type DashboardEmail = {
   subject: string
   sender?: string | null
   classification?: string | null
-  taskLinks?: Array<unknown>
 }
 
-type DashboardMatter = {
+type DashboardContextCount = {
   id: string
-  title: string
-  status: string
-  lastMessageAt?: string | null
-  project?: {
-    id: string
-    name: string
-    identity?: {
-      id: string
-      name: string
-    } | null
-  } | null
+  name: string
+  count: number
+}
+
+type DashboardSummary = {
+  stats: {
+    emails: { total: number; action: number; awareness: number; ignore: number; uncertain: number }
+    tasks: { total: number; pending: number; confirmed: number; completed: number; dismissed: number }
+    sync: {
+      lastSyncAt?: string | null
+      gmailConnected?: boolean
+      providerReauthRequired?: boolean
+    }
+  }
+  tasks: {
+    confirmedPreview: DashboardTask[]
+    pendingPreview: DashboardTask[]
+    confirmedCount: number
+    pendingCount: number
+    dismissedCount: number
+    priorityCounts: { critical: number; high: number; medium: number; low: number }
+    upcomingCount: number
+  }
+  attentionEmails: DashboardEmail[]
+  activeIdentities: DashboardContextCount[]
+  activeProjects: DashboardContextCount[]
+}
+
+type DashboardSummaryResponse = {
+  data?: DashboardSummary
 }
 
 export default function DashboardPage() {
@@ -107,135 +125,32 @@ export default function DashboardPage() {
     setShowSyncModal(false)
     router.replace('/dashboard', { scroll: false })
   }, [router])
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ['stats'],
-    queryFn: () => fetch('/api/stats').then((r) => r.json()),
+  const { data: summaryRes, isLoading: summaryLoading } = useQuery<DashboardSummaryResponse>({
+    queryKey: ['dashboard-summary'],
+    queryFn: () => fetch('/api/dashboard/summary').then((r) => r.json()),
     staleTime: CACHE_TIME.stats,
     placeholderData: (prev) => prev,
   })
 
-  const { data: allTasksRes, isLoading: tasksLoading } = useQuery({
-    queryKey: ['tasks', 'dashboard'],
-    queryFn: () => fetch('/api/tasks?limit=50&sort=priority').then((r) => r.json()),
-    staleTime: CACHE_TIME.list,
-    placeholderData: (prev) => prev,
-  })
-
-  const { data: emailsRes, isLoading: emailsLoading } = useQuery({
-    queryKey: ['emails', 'for-dashboard'],
-    queryFn: () => fetch('/api/emails?limit=50').then((r) => r.json()),
-    staleTime: CACHE_TIME.list,
-    placeholderData: (prev) => prev,
-  })
-
-  const { data: mattersRes, isLoading: mattersLoading } = useQuery({
-    queryKey: ['matters', 'for-dashboard'],
-    queryFn: () => fetch('/api/matters').then((r) => r.json()),
-    staleTime: CACHE_TIME.stats,
-    placeholderData: (prev) => prev,
-  })
-
-  const s = stats?.data
+  const summary = summaryRes?.data
+  const s = summary?.stats
   const providerReauthRequired = Boolean(s?.sync?.providerReauthRequired)
-
-  // Memoize task-derived data so it only recomputes when allTasksRes changes,
-  // not on every re-render triggered by unrelated queries (stats, emails, matters).
-  const allTasks = useMemo<DashboardTask[]>(
-    () => allTasksRes?.data ?? [],
-    [allTasksRes?.data]
-  )
-
-  const { confirmedTasks, pendingTasks, confirmedTaskCount, dismissedTaskCount, priorityCounts, upcomingCount } =
-    useMemo(() => {
-      const confirmed = allTasks.filter((t) => t.status === 'confirmed')
-      const pending = allTasks.filter((t) => t.status === 'pending')
-      const counts = { critical: 0, high: 0, medium: 0, low: 0 }
-      for (const task of allTasks) {
-        const band = getPriorityBand(task.priorityScore || 0)
-        counts[band as keyof typeof counts]++
-      }
-      const now = Date.now()
-      const weekFromNow = now + 7 * 86400000
-      const upcoming = allTasks.filter((task) => {
-        const deadline = task.userSetDeadline || task.explicitDeadline || task.inferredDeadline
-        if (!deadline) return false
-        const t = new Date(deadline).getTime()
-        return t >= now && t <= weekFromNow && (task.status === 'pending' || task.status === 'confirmed')
-      }).length
-      return {
-        confirmedTasks: confirmed.slice(0, 5),
-        pendingTasks: pending.slice(0, 5),
-        confirmedTaskCount: confirmed.length,
-        dismissedTaskCount: allTasks.filter((t) => t.status === 'dismissed').length,
-        priorityCounts: counts,
-        upcomingCount: upcoming,
-      }
-    }, [allTasks])
-
-  // Memoize email-derived data so it only recomputes when emailsRes changes.
-  const allEmails = useMemo<DashboardEmail[]>(
-    () => emailsRes?.data ?? [],
-    [emailsRes?.data]
-  )
-
-  const attentionEmails = useMemo(
-    () =>
-      allEmails
-        .filter(
-          (email) =>
-            (email.classification === 'action' || email.classification === 'uncertain') &&
-            !((email.taskLinks?.length ?? 0) > 0)
-        )
-        .slice(0, 5),
-    [allEmails]
-  )
-
-  const matters = useMemo(
-    () => (mattersRes?.data ?? []) as DashboardMatter[],
-    [mattersRes?.data]
-  )
 
   const totalTasks = s?.tasks?.total ?? 0
   const completedTasks = s?.tasks?.completed ?? 0
-  const pendingTaskCount = s?.tasks?.pending ?? 0
+  const pendingTaskCount = summary?.tasks.pendingCount ?? 0
+  const confirmedTaskCount = summary?.tasks.confirmedCount ?? 0
+  const dismissedTaskCount = summary?.tasks.dismissedCount ?? 0
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
   const emailData = s?.emails ?? { total: 0, action: 0, awareness: 0, ignore: 0, uncertain: 0 }
   const actionToTask = emailData.action > 0 ? Math.round((totalTasks / emailData.action) * 100) : 0
-
-  const activeIdentities = useMemo(() => {
-    const counts = new Map<string, { id: string; name: string; count: number }>()
-    for (const matter of matters) {
-      if (matter.status === 'completed') continue
-      const identity = matter.project?.identity
-      if (!identity) continue
-      const current = counts.get(identity.id) ?? { id: identity.id, name: identity.name, count: 0 }
-      current.count += 1
-      counts.set(identity.id, current)
-    }
-    return Array.from(counts.values()).sort((a, b) => b.count - a.count).slice(0, 4)
-  }, [matters])
-
-  const activeProjects = useMemo(() => {
-    const counts = new Map<string, { id: string; name: string; count: number; lastActivity: number }>()
-    for (const matter of matters) {
-      if (matter.status === 'completed') continue
-      const project = matter.project
-      if (!project) continue
-      const existing = counts.get(project.id) ?? {
-        id: project.id,
-        name: project.name,
-        count: 0,
-        lastActivity: 0,
-      }
-      existing.count += 1
-      existing.lastActivity = Math.max(
-        existing.lastActivity,
-        matter.lastMessageAt ? new Date(matter.lastMessageAt).getTime() : 0
-      )
-      counts.set(project.id, existing)
-    }
-    return Array.from(counts.values()).sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 5)
-  }, [matters])
+  const confirmedTasks = summary?.tasks.confirmedPreview ?? []
+  const pendingTasks = summary?.tasks.pendingPreview ?? []
+  const attentionEmails = summary?.attentionEmails ?? []
+  const priorityCounts = summary?.tasks.priorityCounts ?? { critical: 0, high: 0, medium: 0, low: 0 }
+  const upcomingCount = summary?.tasks.upcomingCount ?? 0
+  const activeIdentities = summary?.activeIdentities ?? []
+  const activeProjects = summary?.activeProjects ?? []
 
   return (
     <div className="space-y-6">
@@ -243,7 +158,7 @@ export default function DashboardPage() {
         title={`Hi, ${user?.name?.split(' ')[0] || 'there'}`}
         description="Your email-to-task command center."
         actions={
-          statsLoading ? (
+          summaryLoading ? (
             <Skeleton className="h-9 w-28 rounded-lg" />
           ) : providerReauthRequired ? (
             <Link href="/dashboard/settings">
@@ -297,7 +212,7 @@ export default function DashboardPage() {
       ) : null}
 
       <div className="animate-fade-in-up stagger-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statsLoading ? (
+        {summaryLoading ? (
           <>
             <StatCardSkeleton />
             <StatCardSkeleton />
@@ -335,7 +250,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {(statsLoading || tasksLoading) ? (
+        {summaryLoading ? (
           <>
             <ChartCardSkeleton />
             <ChartCardSkeleton />
@@ -393,10 +308,10 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2.5">
-                  <BarRow label="Critical" value={priorityCounts.critical} max={allTasks.length || 1} color="bg-red-500" />
-                  <BarRow label="High" value={priorityCounts.high} max={allTasks.length || 1} color="bg-orange-400" />
-                  <BarRow label="Medium" value={priorityCounts.medium} max={allTasks.length || 1} color="bg-yellow-400" />
-                  <BarRow label="Low" value={priorityCounts.low} max={allTasks.length || 1} color="bg-gray-300" />
+                  <BarRow label="Critical" value={priorityCounts.critical} max={totalTasks || 1} color="bg-red-500" />
+                  <BarRow label="High" value={priorityCounts.high} max={totalTasks || 1} color="bg-orange-400" />
+                  <BarRow label="Medium" value={priorityCounts.medium} max={totalTasks || 1} color="bg-yellow-400" />
+                  <BarRow label="Low" value={priorityCounts.low} max={totalTasks || 1} color="bg-gray-300" />
                 </div>
                 <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2">
                   <Target className="h-3.5 w-3.5 text-blue-600" />
@@ -410,9 +325,9 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {(mattersLoading || activeIdentities.length > 0 || activeProjects.length > 0) && (
+      {(summaryLoading || activeIdentities.length > 0 || activeProjects.length > 0) && (
         <div className="animate-fade-in-up stagger-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {mattersLoading ? (
+          {summaryLoading ? (
             <>
               <IdentityCardSkeleton />
               <IdentityCardSkeleton />
@@ -491,9 +406,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {(tasksLoading || emailsLoading || pendingTasks.length > 0 || attentionEmails.length > 0) && (
+      {(summaryLoading || pendingTasks.length > 0 || attentionEmails.length > 0) && (
         <div className="animate-fade-in-up stagger-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {tasksLoading ? (
+          {summaryLoading ? (
             <ListCardSkeleton />
           ) : (
             <Card className="border-purple-200/80 bg-[linear-gradient(180deg,rgba(250,245,255,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
@@ -543,7 +458,7 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {emailsLoading ? (
+          {summaryLoading ? (
             <ListCardSkeleton />
           ) : (
             <Card className="border-red-200/80 bg-[linear-gradient(180deg,rgba(254,242,242,0.75)_0%,rgba(255,255,255,1)_100%)] shadow-sm">
@@ -600,7 +515,7 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {tasksLoading ? (
+          {summaryLoading ? (
             <div className="space-y-3">
               {[...Array(3)].map((_, i) => (
                 <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">

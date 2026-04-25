@@ -20,13 +20,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isLoading, isAuthenticated, router])
 
-  if (isLoading || !isAuthenticated) {
+  if (!isLoading && !isAuthenticated) {
     return (
       <div className="mx-auto flex h-screen w-full max-w-xl items-center px-6">
         <StatePanel
           loading
-          title="Loading your workspace"
-          description="Checking your session and preparing your dashboard."
+          title="Redirecting to sign in"
+          description="Your session could not be verified."
           className="w-full"
         />
       </div>
@@ -39,7 +39,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
         <main className="min-h-[calc(100vh-3.5rem)] flex-1 px-6 pb-10 pt-6">
-          <SectionFade>{children}</SectionFade>
+          <SectionFade>
+            {isLoading ? (
+              <StatePanel
+                loading
+                title="Loading your workspace"
+                description="Checking your session and preparing your dashboard."
+                className="mx-auto mt-16 max-w-xl"
+              />
+            ) : (
+              children
+            )}
+          </SectionFade>
         </main>
       </div>
     </div>
