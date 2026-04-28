@@ -185,7 +185,7 @@ export function RetentionPolicyCard() {
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader className="pb-3">
+      <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Archive className="h-4 w-4 text-blue-700" />
           Email Retention
