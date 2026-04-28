@@ -151,9 +151,6 @@ function getTimezonePrimaryLabel(timezone: string) {
 export default function SettingsPage() {
   const { user, logout } = useAuth()
   const queryClient = useQueryClient()
-  const [syncPickerOpen, setSyncPickerOpen] = useState(false)
-  const [pendingDate, setPendingDate] = useState<Date | undefined>()
-  const [todayMs] = useState(() => Date.now())
   const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
   const [timezoneSearch, setTimezoneSearch] = useState('')
   const [deviceTimezone] = useState<string | null>(() => {
@@ -185,7 +182,6 @@ export default function SettingsPage() {
   const providerReauthProvider =
     currentUser?.emailProviderReauthProvider || syncData?.providerReauthProvider || 'gmail'
   const connectedGmail = currentUser?.gmailEmail || null
-  const currentSyncStartDate = currentUser?.syncStartDate ? new Date(currentUser.syncStartDate) : null
   const supportedTimezones = useMemo(() => {
     if (typeof Intl !== 'undefined' && 'supportedValuesOf' in Intl) {
       return Intl.supportedValuesOf('timeZone')
@@ -231,80 +227,6 @@ export default function SettingsPage() {
     return scored.slice(0, 16).map((item) => item.timezone)
   }, [supportedTimezones, timezoneSearch])
 
-  const syncSummary = (() => {
-    if (!currentUser?.syncStartDate) {
-      return {
-        days: 7,
-        exactPreset: 7,
-        label: 'Last 7 days',
-        helper: 'Default sync window for new accounts.',
-      }
-    }
-
-    const now = new Date()
-    const startDate = new Date(currentUser.syncStartDate)
-    const diffMs = Math.max(0, now.getTime() - startDate.getTime())
-    const days = Math.max(1, Math.round(diffMs / 86400000))
-    const exactPreset = SYNC_PRESETS.includes(days as (typeof SYNC_PRESETS)[number]) ? days : null
-
-    return {
-      days,
-      exactPreset,
-      label: exactPreset ? `Last ${exactPreset} days` : `Custom range: ${days} days`,
-      helper: `Sync starts from ${startDate.toLocaleDateString()}.`,
-    }
-  })()
-
-  const disconnectMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/auth/google/disconnect', {
-        method: 'POST',
-      })
-
-      const json = await res.json()
-
-      if (!res.ok) {
-        throw new Error(json?.error || 'Disconnect failed')
-      }
-
-      return json
-    },
-    onSuccess: () => {
-      toast.success('Gmail disconnected')
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
-      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
-    },
-    onError: (err: Error) => {
-      showError(err.message || 'Failed to disconnect Gmail')
-    },
-  })
-
-  const syncRangeMutation = useMutation({
-    mutationFn: async (days: number) => {
-      const res = await fetch('/api/settings/sync-range', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days }),
-      })
-
-      const json = await res.json()
-
-      if (!res.ok) {
-        throw new Error(json?.error || 'Failed to update sync range')
-      }
-
-      return json
-    },
-    onSuccess: () => {
-      toast.success('Sync window updated')
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
-      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
-    },
-    onError: (err: Error) => {
-      showError(err.message || 'Failed to update sync window')
-    },
-  })
-
   const timezoneMutation = useMutation({
     mutationFn: async (timezone: string) => {
       const res = await fetch('/api/settings/timezone', {
@@ -327,11 +249,6 @@ export default function SettingsPage() {
     },
   })
 
-  const isBusy = disconnectMutation.isPending || syncRangeMutation.isPending
-  const pendingDays = pendingDate
-    ? Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
-    : null
-
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
@@ -340,9 +257,9 @@ export default function SettingsPage() {
       />
 
       <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <CardContent className="flex flex-col gap-4 space-y-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-gray-900">{user?.name || 'Your account'}</p>
+            <p className="text-2xl font-semibold text-gray-900">{user?.name || 'Your account'}</p>
             <p className="text-sm text-gray-500">{user?.email}</p>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-800">
@@ -367,267 +284,26 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <PasswordCard />
-
-      <ChangePasswordCard />
-
-      <TwoFactorCard totpEnabled={Boolean(currentUser?.totpEnabled)} onDisabled={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })} />
-
-      <DeviceSessionsCard currentSessionId={currentUser?.currentSessionId || null} onLogoutCurrent={() => logout()} />
-
-      <RetentionPolicyCard />
-
-      <DangerZoneCard onDeleted={() => logout()} />
-
-      <GoogleAccountCard
+      <LinkAccountCard
         googleAccount={currentUser?.googleAccount ?? null}
         onDisconnected={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })}
       />
 
-      <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Mail className="h-4 w-4 text-blue-700" />
-            Email Connection
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-gray-900">Gmail</p>
-                  <Badge
-                    variant={providerReauthRequired || gmailConnected ? 'default' : 'outline'}
-                    className={
-                      providerReauthRequired
-                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
-                        : gmailConnected
-                          ? 'bg-green-100 text-green-700 hover:bg-green-100'
-                          : ''
-                    }
-                  >
-                    {providerReauthRequired ? 'Reconnect required' : gmailConnected ? 'Connected' : 'Not connected'}
-                  </Badge>
-                </div>
-                <p className="text-sm text-gray-600">
-                  {providerReauthRequired
-                    ? 'Your Gmail connection has expired. Reconnect it to resume syncing.'
-                    : gmailConnected
-                      ? connectedGmail || 'Connected Gmail account'
-                      : 'Connect Gmail to start syncing mail.'}
-                </p>
-                <p className="text-xs text-gray-400">
-                  {providerReauthRequired
-                    ? `Last valid connection: ${syncData?.providerReauthAt ? new Date(syncData.providerReauthAt).toLocaleString() : 'unknown'}`
-                    : syncData?.lastSyncAt
-                    ? `Last synced ${new Date(syncData.lastSyncAt).toLocaleString()}`
-                    : gmailConnected
-                      ? 'Connection is ready. Your next sync will use the current window below.'
-                      : 'Read-only OAuth connection. We never send, delete, or edit your emails.'}
-                </p>
-              </div>
+      <EmailConnectionCard
+        gmailConnected={gmailConnected}
+        providerReauthRequired={providerReauthRequired}
+        providerReauthProvider={providerReauthProvider}
+        connectedGmail={connectedGmail}
+        providerReauthAt={syncData?.providerReauthAt ?? null}
+        lastSyncAt={syncData?.lastSyncAt ?? null}
+      />
 
-              {gmailConnected ? (
-                <Button
-                  variant={providerReauthRequired ? 'default' : 'outline'}
-                  size="sm"
-                  className={
-                    providerReauthRequired
-                      ? 'gap-2'
-                      : 'gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700'
-                  }
-                  onClick={() => {
-                    window.location.href = '/api/auth/google'
-                  }}
-                  disabled={isBusy || disconnectMutation.isPending}
-                >
-                  <Mail className="h-3.5 w-3.5" />
-                  {providerReauthRequired ? 'Reconnect Gmail' : 'Reconnect Gmail'}
-                </Button>
-              ) : (
-                <a href="/api/auth/google" className="self-start">
-                  <Button size="sm" className="gap-2">
-                    <Mail className="h-3.5 w-3.5" />
-                    Connect Gmail
-                  </Button>
-                </a>
-              )}
-            </div>
-          </div>
+      <RetentionPolicyCard />
 
-          {gmailConnected && !providerReauthRequired ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
-              onClick={() => disconnectMutation.mutate()}
-              disabled={isBusy}
-            >
-              {disconnectMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Unplug className="h-3.5 w-3.5" />
-              )}
-              Disconnect Gmail
-            </Button>
-          ) : null}
-
-          {providerReauthRequired ? (
-            <InlineNotice variant="warning">
-              <p className="text-sm">
-                Your {providerReauthProvider === 'outlook' ? 'Outlook' : 'Gmail'} connection can no longer refresh access.
-                Reconnect it, then run sync again.
-              </p>
-            </InlineNotice>
-          ) : null}
-
-          <InlineNotice variant="info">
-            <p className="text-sm">
-              Outlook and additional providers can be added later. For now, the settings flow is optimized for one Gmail connection.
-            </p>
-          </InlineNotice>
-        </CardContent>
-      </Card>
+      <EmailSyncWindowCard syncStartDate={currentUser?.syncStartDate ?? null} />
 
       <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Clock3 className="h-4 w-4 text-blue-700" />
-            Email Sync Window
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-blue-900">{syncSummary.label}</p>
-                <p className="mt-1 text-sm text-blue-800/80">{syncSummary.helper}</p>
-              </div>
-              {syncSummary.exactPreset ? (
-                <Badge className="bg-white text-blue-800 hover:bg-white">Preset active</Badge>
-              ) : (
-                <Badge variant="outline" className="border-blue-200 bg-white/80 text-blue-800">
-                  Custom date in use
-                </Badge>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Change sync date</p>
-              <p className="text-xs text-gray-500">Quick presets are fastest. Use a custom date when you want a one-off backfill.</p>
-            </div>
-            <Popover
-              open={syncPickerOpen}
-              onOpenChange={(open) => {
-                setSyncPickerOpen(open)
-                if (open) {
-                  setPendingDate(currentSyncStartDate || undefined)
-                } else {
-                  setPendingDate(undefined)
-                }
-              }}
-            >
-              <PopoverTrigger className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 transition-all hover:border-blue-200 hover:bg-blue-50/70 hover:text-blue-700">
-                <CalendarIcon className="h-3.5 w-3.5" />
-                Pick date
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto overflow-hidden rounded-2xl border border-gray-200 p-0 shadow-lg">
-                <div className="border-b border-gray-100 px-4 py-3">
-                  <p className="text-sm font-medium text-gray-900">Choose a sync start date</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    The next sync will start from this date and pull newer email forward from there.
-                  </p>
-                </div>
-                <Calendar
-                  mode="single"
-                  selected={pendingDate}
-                  onSelect={setPendingDate}
-                  captionLayout="dropdown"
-                  disabled={(date) => date > new Date(todayMs) || date < new Date(todayMs - 365 * 86400000)}
-                />
-                <div className="border-t border-gray-100 bg-blue-50/40 px-4 py-3">
-                  <p className="text-xs font-medium text-blue-900">
-                    {pendingDate
-                      ? `Selected start date: ${pendingDate.toLocaleDateString()}`
-                      : 'Pick a start date to preview the next sync window.'}
-                  </p>
-                  <p className="mt-1 text-xs text-blue-800/80">
-                    {pendingDays
-                      ? `This is about the last ${pendingDays} day${pendingDays === 1 ? '' : 's'} of email.`
-                      : 'You can choose any date from the last 12 months.'}
-                  </p>
-                </div>
-                <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSyncPickerOpen(false)
-                      setPendingDate(undefined)
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={!pendingDate || syncRangeMutation.isPending}
-                    onClick={() => {
-                      if (!pendingDate) return
-                      const days = Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
-                      syncRangeMutation.mutate(days, {
-                        onSettled: () => {
-                          setSyncPickerOpen(false)
-                          setPendingDate(undefined)
-                        },
-                      })
-                    }}
-                  >
-                    {syncRangeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    Apply
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {SYNC_PRESETS.map((days) => {
-              const isActive = syncSummary.exactPreset === days
-
-              return (
-                <Button
-                  key={days}
-                  type="button"
-                  variant={isActive ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => syncRangeMutation.mutate(days)}
-                  disabled={isBusy}
-                  className={`transition-all duration-200 ${
-                    isActive
-                      ? 'scale-110 shadow-md ring-2 ring-blue-500/30'
-                      : 'scale-90 opacity-60 hover:opacity-80'
-                  }`}
-                >
-                  {days} days
-                </Button>
-              )
-            })}
-          </div>
-
-          <InlineNotice variant="warning">
-            <p className="text-sm">
-              After you change the sync window, run sync again to pull mail from the new range.
-            </p>
-          </InlineNotice>
-        </CardContent>
-      </Card>
-
-      <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
+        <CardHeader >
           <CardTitle className="flex items-center gap-2 text-base">
             <Globe className="h-4 w-4 text-blue-700" />
             Timezone
@@ -762,8 +438,16 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      <PasswordCard />
+
+      {/* <ChangePasswordCard /> */}
+
+      <TwoFactorCard totpEnabled={Boolean(currentUser?.totpEnabled)} onDisabled={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })} />
+
+      <DeviceSessionsCard currentSessionId={currentUser?.currentSessionId || null} onLogoutCurrent={() => logout()} />
+
       <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
+        <CardHeader >
           <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="h-4 w-4 text-blue-700" />
             Privacy and Data Handling
@@ -786,7 +470,345 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      
+      <DangerZoneCard onDeleted={() => logout()} />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// EmailConnectionCard
+// ---------------------------------------------------------------------------
+
+function EmailConnectionCard({
+  gmailConnected,
+  providerReauthRequired,
+  providerReauthProvider,
+  connectedGmail,
+  providerReauthAt,
+  lastSyncAt,
+}: {
+  gmailConnected: boolean
+  providerReauthRequired: boolean
+  providerReauthProvider: string
+  connectedGmail: string | null
+  providerReauthAt: string | null
+  lastSyncAt: string | null
+}) {
+  const queryClient = useQueryClient()
+
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/auth/google/disconnect', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || 'Disconnect failed')
+      return json
+    },
+    onSuccess: () => {
+      toast.success('Gmail disconnected')
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
+    },
+    onError: (err: Error) => {
+      showError(err.message || 'Failed to disconnect Gmail')
+    },
+  })
+
+  return (
+    <Card className="border-white/80 bg-white/95 shadow-sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Mail className="h-4 w-4 text-blue-700" />
+          Email Connection
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-900">Gmail</p>
+                <Badge
+                  variant={providerReauthRequired || gmailConnected ? 'default' : 'outline'}
+                  className={
+                    providerReauthRequired
+                      ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
+                      : gmailConnected
+                        ? 'bg-green-100 text-green-700 hover:bg-green-100'
+                        : ''
+                  }
+                >
+                  {providerReauthRequired ? 'Reconnect required' : gmailConnected ? 'Connected' : 'Not connected'}
+                </Badge>
+              </div>
+              <p className="text-sm text-gray-600">
+                {providerReauthRequired
+                  ? 'Your Gmail connection has expired. Reconnect it to resume syncing.'
+                  : gmailConnected
+                    ? connectedGmail || 'Connected Gmail account'
+                    : 'Connect Gmail to start syncing mail.'}
+              </p>
+              <p className="text-xs text-gray-400">
+                {providerReauthRequired
+                  ? `Last valid connection: ${providerReauthAt ? new Date(providerReauthAt).toLocaleString() : 'unknown'}`
+                  : lastSyncAt
+                  ? `Last synced ${new Date(lastSyncAt).toLocaleString()}`
+                  : gmailConnected
+                    ? 'Connection is ready. Your next sync will use the current window below.'
+                    : 'Read-only OAuth connection. We never send, delete, or edit your emails.'}
+              </p>
+            </div>
+
+            {gmailConnected ? (
+              <Button
+                variant={providerReauthRequired ? 'default' : 'outline'}
+                size="sm"
+                className={
+                  providerReauthRequired
+                    ? 'gap-2'
+                    : 'gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700'
+                }
+                onClick={() => { window.location.href = '/api/auth/google' }}
+                disabled={disconnectMutation.isPending}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Reconnect Gmail
+              </Button>
+            ) : (
+              <a href="/api/auth/google" className="self-start">
+                <Button size="sm" className="gap-2">
+                  <Mail className="h-3.5 w-3.5" />
+                  Connect Gmail
+                </Button>
+              </a>
+            )}
+          </div>
+        </div>
+
+        {gmailConnected && !providerReauthRequired ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
+            onClick={() => disconnectMutation.mutate()}
+            disabled={disconnectMutation.isPending}
+          >
+            {disconnectMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Unplug className="h-3.5 w-3.5" />
+            )}
+            Disconnect Gmail
+          </Button>
+        ) : null}
+
+        {providerReauthRequired ? (
+          <InlineNotice variant="warning">
+            <p className="text-sm">
+              Your {providerReauthProvider === 'outlook' ? 'Outlook' : 'Gmail'} connection can no longer refresh access.
+              Reconnect it, then run sync again.
+            </p>
+          </InlineNotice>
+        ) : null}
+
+        <InlineNotice variant="info">
+          <p className="text-sm">
+            Outlook and additional providers can be added later. For now, the settings flow is optimized for one Gmail connection.
+          </p>
+        </InlineNotice>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// EmailSyncWindowCard
+// ---------------------------------------------------------------------------
+
+function EmailSyncWindowCard({ syncStartDate }: { syncStartDate: string | null }) {
+  const queryClient = useQueryClient()
+  const [syncPickerOpen, setSyncPickerOpen] = useState(false)
+  const [pendingDate, setPendingDate] = useState<Date | undefined>()
+  const [todayMs] = useState(() => Date.now())
+
+  const currentSyncStartDate = syncStartDate ? new Date(syncStartDate) : null
+
+  const syncSummary = (() => {
+    if (!syncStartDate) {
+      return { exactPreset: 7 as number | null, label: 'Last 7 days', helper: 'Default sync window for new accounts.' }
+    }
+    const now = new Date()
+    const startDate = new Date(syncStartDate)
+    const diffMs = Math.max(0, now.getTime() - startDate.getTime())
+    const days = Math.max(1, Math.round(diffMs / 86400000))
+    const exactPreset = SYNC_PRESETS.includes(days as (typeof SYNC_PRESETS)[number]) ? days : null
+    return {
+      exactPreset,
+      label: exactPreset ? `Last ${exactPreset} days` : `Custom range: ${days} days`,
+      helper: `Sync starts from ${startDate.toLocaleDateString()}.`,
+    }
+  })()
+
+  const pendingDays = pendingDate
+    ? Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
+    : null
+
+  const syncRangeMutation = useMutation({
+    mutationFn: async (days: number) => {
+      const res = await fetch('/api/settings/sync-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || 'Failed to update sync range')
+      return json
+    },
+    onSuccess: () => {
+      toast.success('Sync window updated')
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
+    },
+    onError: (err: Error) => {
+      showError(err.message || 'Failed to update sync window')
+    },
+  })
+
+  return (
+    <Card className="border-white/80 bg-white/95 shadow-sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Clock3 className="h-4 w-4 text-blue-700" />
+          Email Sync Window
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-blue-900">{syncSummary.label}</p>
+              <p className="mt-1 text-sm text-blue-800/80">{syncSummary.helper}</p>
+            </div>
+            {syncSummary.exactPreset ? (
+              <Badge className="bg-white text-blue-800 hover:bg-white">Preset active</Badge>
+            ) : (
+              <Badge variant="outline" className="border-blue-200 bg-white/80 text-blue-800">
+                Custom date in use
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Change sync date</p>
+            <p className="text-xs text-gray-500">Quick presets are fastest. Use a custom date when you want a one-off backfill.</p>
+          </div>
+          <Popover
+            open={syncPickerOpen}
+            onOpenChange={(open) => {
+              setSyncPickerOpen(open)
+              if (open) {
+                setPendingDate(currentSyncStartDate || undefined)
+              } else {
+                setPendingDate(undefined)
+              }
+            }}
+          >
+            <PopoverTrigger className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 transition-all hover:border-blue-200 hover:bg-blue-50/70 hover:text-blue-700">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              Pick date
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-auto overflow-hidden rounded-2xl border border-gray-200 p-0 shadow-lg">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <p className="text-sm font-medium text-gray-900">Choose a sync start date</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  The next sync will start from this date and pull newer email forward from there.
+                </p>
+              </div>
+              <Calendar
+                mode="single"
+                selected={pendingDate}
+                onSelect={setPendingDate}
+                captionLayout="dropdown"
+                disabled={(date) => date > new Date(todayMs) || date < new Date(todayMs - 365 * 86400000)}
+              />
+              <div className="border-t border-gray-100 bg-blue-50/40 px-4 py-3">
+                <p className="text-xs font-medium text-blue-900">
+                  {pendingDate
+                    ? `Selected start date: ${pendingDate.toLocaleDateString()}`
+                    : 'Pick a start date to preview the next sync window.'}
+                </p>
+                <p className="mt-1 text-xs text-blue-800/80">
+                  {pendingDays
+                    ? `This is about the last ${pendingDays} day${pendingDays === 1 ? '' : 's'} of email.`
+                    : 'You can choose any date from the last 12 months.'}
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSyncPickerOpen(false)
+                    setPendingDate(undefined)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={!pendingDate || syncRangeMutation.isPending}
+                  onClick={() => {
+                    if (!pendingDate) return
+                    const days = Math.max(1, Math.round((todayMs - pendingDate.getTime()) / 86400000))
+                    syncRangeMutation.mutate(days, {
+                      onSettled: () => {
+                        setSyncPickerOpen(false)
+                        setPendingDate(undefined)
+                      },
+                    })
+                  }}
+                >
+                  {syncRangeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Apply
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {SYNC_PRESETS.map((days) => {
+            const isActive = syncSummary.exactPreset === days
+            return (
+              <Button
+                key={days}
+                type="button"
+                variant={isActive ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => syncRangeMutation.mutate(days)}
+                disabled={syncRangeMutation.isPending}
+                className={`transition-all duration-200 ${
+                  isActive
+                    ? 'scale-110 shadow-md ring-2 ring-blue-500/30'
+                    : 'scale-90 opacity-60 hover:opacity-80'
+                }`}
+              >
+                {days} days
+              </Button>
+            )
+          })}
+        </div>
+
+        <InlineNotice variant="warning">
+          <p className="text-sm">
+            After you change the sync window, run sync again to pull mail from the new range.
+          </p>
+        </InlineNotice>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -815,10 +837,10 @@ function PasswordCard() {
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader className="pb-3">
+      <CardHeader >
         <CardTitle className="flex items-center gap-2 text-base">
           <KeyRound className="h-4 w-4 text-blue-700" />
-          Password
+          Change Password
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -922,7 +944,7 @@ function DeviceSessionsCard({
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader className="pb-3">
+      <CardHeader >
         <CardTitle className="flex items-center gap-2 text-base">
           <MonitorSmartphone className="h-4 w-4 text-blue-700" />
           Device Sessions
@@ -1152,7 +1174,7 @@ function ChangePasswordCard() {
   return (
     <>
       <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
+        <CardHeader >
           <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="h-4 w-4 text-blue-700" />
             Change Password
@@ -1256,7 +1278,7 @@ function TwoFactorCard({ totpEnabled, onDisabled }: { totpEnabled: boolean; onDi
   return (
     <>
       <Card className="border-white/80 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
+        <CardHeader >
           <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="h-4 w-4 text-blue-700" />
             Two-Factor Authentication
@@ -1357,7 +1379,7 @@ function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
   return (
     <>
       <Card className="border-red-200/60 bg-white/95 shadow-sm">
-        <CardHeader className="pb-3">
+        <CardHeader >
           <CardTitle className="flex items-center gap-2 text-base text-red-700">
             <AlertTriangle className="h-4 w-4" />
             Danger Zone
@@ -1414,10 +1436,10 @@ function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Google Account binding card
+// Link Account card
 // ---------------------------------------------------------------------------
 
-function GoogleAccountCard({
+function LinkAccountCard({
   googleAccount,
   onDisconnected,
 }: {
@@ -1445,10 +1467,10 @@ function GoogleAccountCard({
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader className="pb-3">
+      <CardHeader >
         <CardTitle className="flex items-center gap-2 text-base">
           <KeyRound className="h-4 w-4 text-blue-700" />
-          Google Account
+          Link Account
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1496,6 +1518,11 @@ function GoogleAccountCard({
             )}
           </div>
         </div>
+        <InlineNotice variant="info">
+          <p className="text-sm">
+            Upcoming: Outlook / Microsoft account linking and sign-in.
+          </p>
+        </InlineNotice>
       </CardContent>
     </Card>
   )
