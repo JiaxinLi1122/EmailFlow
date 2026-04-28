@@ -259,7 +259,7 @@ export default function SettingsPage() {
       <Card className="border-white/80 bg-white/95 shadow-sm">
         <CardContent className="flex flex-col gap-4 space-y-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <p className="text-2xl font-semibold text-gray-900">{user?.name || 'Your account'}</p>
+            <p className="text-2xl font-semibold text-gray-900">Hello, {user?.name || 'Your account'}!</p>
             <p className="text-sm text-gray-500">{user?.email}</p>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-800">
@@ -286,10 +286,6 @@ export default function SettingsPage() {
 
       <LinkAccountCard
         googleAccount={currentUser?.googleAccount ?? null}
-        onDisconnected={() => queryClient.invalidateQueries({ queryKey: ['auth-me'] })}
-      />
-
-      <EmailConnectionCard
         gmailConnected={gmailConnected}
         providerReauthRequired={providerReauthRequired}
         providerReauthProvider={providerReauthProvider}
@@ -473,151 +469,6 @@ export default function SettingsPage() {
       
       <DangerZoneCard onDeleted={() => logout()} />
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// EmailConnectionCard
-// ---------------------------------------------------------------------------
-
-function EmailConnectionCard({
-  gmailConnected,
-  providerReauthRequired,
-  providerReauthProvider,
-  connectedGmail,
-  providerReauthAt,
-  lastSyncAt,
-}: {
-  gmailConnected: boolean
-  providerReauthRequired: boolean
-  providerReauthProvider: string
-  connectedGmail: string | null
-  providerReauthAt: string | null
-  lastSyncAt: string | null
-}) {
-  const queryClient = useQueryClient()
-
-  const disconnectMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/auth/google/disconnect', { method: 'POST' })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Disconnect failed')
-      return json
-    },
-    onSuccess: () => {
-      toast.success('Gmail disconnected')
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
-      queryClient.invalidateQueries({ queryKey: ['auth-me'] })
-    },
-    onError: (err: Error) => {
-      showError(err.message || 'Failed to disconnect Gmail')
-    },
-  })
-
-  return (
-    <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Mail className="h-4 w-4 text-blue-700" />
-          Email Connection
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-gray-900">Gmail</p>
-                <Badge
-                  variant={providerReauthRequired || gmailConnected ? 'default' : 'outline'}
-                  className={
-                    providerReauthRequired
-                      ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
-                      : gmailConnected
-                        ? 'bg-green-100 text-green-700 hover:bg-green-100'
-                        : ''
-                  }
-                >
-                  {providerReauthRequired ? 'Reconnect required' : gmailConnected ? 'Connected' : 'Not connected'}
-                </Badge>
-              </div>
-              <p className="text-sm text-gray-600">
-                {providerReauthRequired
-                  ? 'Your Gmail connection has expired. Reconnect it to resume syncing.'
-                  : gmailConnected
-                    ? connectedGmail || 'Connected Gmail account'
-                    : 'Connect Gmail to start syncing mail.'}
-              </p>
-              <p className="text-xs text-gray-400">
-                {providerReauthRequired
-                  ? `Last valid connection: ${providerReauthAt ? new Date(providerReauthAt).toLocaleString() : 'unknown'}`
-                  : lastSyncAt
-                  ? `Last synced ${new Date(lastSyncAt).toLocaleString()}`
-                  : gmailConnected
-                    ? 'Connection is ready. Your next sync will use the current window below.'
-                    : 'Read-only OAuth connection. We never send, delete, or edit your emails.'}
-              </p>
-            </div>
-
-            {gmailConnected ? (
-              <Button
-                variant={providerReauthRequired ? 'default' : 'outline'}
-                size="sm"
-                className={
-                  providerReauthRequired
-                    ? 'gap-2'
-                    : 'gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700'
-                }
-                onClick={() => { window.location.href = '/api/auth/google' }}
-                disabled={disconnectMutation.isPending}
-              >
-                <Mail className="h-3.5 w-3.5" />
-                Reconnect Gmail
-              </Button>
-            ) : (
-              <a href="/api/auth/google" className="self-start">
-                <Button size="sm" className="gap-2">
-                  <Mail className="h-3.5 w-3.5" />
-                  Connect Gmail
-                </Button>
-              </a>
-            )}
-          </div>
-        </div>
-
-        {gmailConnected && !providerReauthRequired ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
-            onClick={() => disconnectMutation.mutate()}
-            disabled={disconnectMutation.isPending}
-          >
-            {disconnectMutation.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Unplug className="h-3.5 w-3.5" />
-            )}
-            Disconnect Gmail
-          </Button>
-        ) : null}
-
-        {providerReauthRequired ? (
-          <InlineNotice variant="warning">
-            <p className="text-sm">
-              Your {providerReauthProvider === 'outlook' ? 'Outlook' : 'Gmail'} connection can no longer refresh access.
-              Reconnect it, then run sync again.
-            </p>
-          </InlineNotice>
-        ) : null}
-
-        <InlineNotice variant="info">
-          <p className="text-sm">
-            Outlook and additional providers can be added later. For now, the settings flow is optimized for one Gmail connection.
-          </p>
-        </InlineNotice>
-      </CardContent>
-    </Card>
   )
 }
 
@@ -1441,10 +1292,20 @@ function DangerZoneCard({ onDeleted }: { onDeleted: () => void }) {
 
 function LinkAccountCard({
   googleAccount,
-  onDisconnected,
+  gmailConnected,
+  providerReauthRequired,
+  providerReauthProvider,
+  connectedGmail,
+  providerReauthAt,
+  lastSyncAt,
 }: {
   googleAccount: { email: string | null } | null
-  onDisconnected: () => void
+  gmailConnected: boolean
+  providerReauthRequired: boolean
+  providerReauthProvider: string
+  connectedGmail: string | null
+  providerReauthAt: string | null
+  lastSyncAt: string | null
 }) {
   const queryClient = useQueryClient()
   const bound = Boolean(googleAccount)
@@ -1457,8 +1318,8 @@ function LinkAccountCard({
     },
     onSuccess: () => {
       toast.success('Google account disconnected')
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['auth-me'] })
-      onDisconnected()
     },
     onError: (err: Error) => {
       showError(err.message || 'Failed to disconnect Google account')
@@ -1467,7 +1328,7 @@ function LinkAccountCard({
 
   return (
     <Card className="border-white/80 bg-white/95 shadow-sm">
-      <CardHeader >
+      <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <KeyRound className="h-4 w-4 text-blue-700" />
           Link Account
@@ -1485,19 +1346,62 @@ function LinkAccountCard({
                 >
                   {bound ? 'Bound' : 'Not bound'}
                 </Badge>
+                {bound && (
+                  <Badge
+                    variant={providerReauthRequired || gmailConnected ? 'default' : 'outline'}
+                    className={
+                      providerReauthRequired
+                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
+                        : gmailConnected
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-100'
+                          : ''
+                    }
+                  >
+                    {providerReauthRequired ? 'Reconnect required' : gmailConnected ? 'Gmail syncing' : 'Gmail not syncing'}
+                  </Badge>
+                )}
               </div>
               <p className="text-sm text-gray-600">
                 {bound
                   ? googleAccount?.email || 'Google account linked'
-                  : 'Bind your Google account to sign in with Google.'}
+                  : 'Bind your Google/Gmail account to sign in with Google.'}
               </p>
+              {bound && (
+                <>
+                  <p className="text-sm text-gray-600">
+                    {providerReauthRequired
+                      ? 'Your Gmail connection has expired. Reconnect it to resume syncing.'
+                      : gmailConnected
+                        ? connectedGmail || 'Connected Gmail account'
+                        : 'Connect Gmail to start syncing mail.'}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {providerReauthRequired
+                      ? `Last valid connection: ${providerReauthAt ? new Date(providerReauthAt).toLocaleString() : 'unknown'}`
+                      : lastSyncAt
+                      ? `Last synced ${new Date(lastSyncAt).toLocaleString()}`
+                      : gmailConnected
+                        ? 'Connection is ready. Your next sync will use the current window below.'
+                        : 'Read-only OAuth connection. We never send, delete, or edit your emails.'}
+                  </p>
+                </>
+              )}
             </div>
 
-            {bound ? (
+            {providerReauthRequired ? (
+              <Button
+                size="sm"
+                className="gap-2 self-start"
+                onClick={() => { window.location.href = '/api/auth/google' }}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Reconnect
+              </Button>
+            ) : bound ? (
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
+                className="gap-2 self-start border-red-200 text-red-700 hover:bg-red-50 hover:text-red-700"
                 onClick={() => disconnect.mutate()}
                 disabled={disconnect.isPending}
               >
@@ -1518,9 +1422,19 @@ function LinkAccountCard({
             )}
           </div>
         </div>
+
+        {providerReauthRequired && (
+          <InlineNotice variant="warning">
+            <p className="text-sm">
+              Your {providerReauthProvider === 'outlook' ? 'Outlook' : 'Gmail'} connection can no longer refresh access.
+              Reconnect it, then run sync again.
+            </p>
+          </InlineNotice>
+        )}
+
         <InlineNotice variant="info">
           <p className="text-sm">
-            Upcoming: Outlook / Microsoft account linking and sign-in.
+            Outlook and additional providers can be added later. For now, the settings flow is optimized for one Gmail connection.
           </p>
         </InlineNotice>
       </CardContent>
