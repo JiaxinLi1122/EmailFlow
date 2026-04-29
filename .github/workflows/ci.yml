@@ -54,6 +54,9 @@ jobs:
       OPENAI_API_KEY: sk-ci-placeholder
       ANTHROPIC_API_KEY: sk-ant-ci-placeholder
       REDIS_URL: redis://localhost:6379
+      NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4

@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { withSentryConfig } from '@sentry/nextjs'
 
 const nextConfig: NextConfig = {
   webpack: (config, { dev }) => {
@@ -15,4 +16,21 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+export default withSentryConfig(nextConfig, {
+  org: 'vaxon',
+  project: 'emailflowai',
+
+  silent: !process.env.CI,
+
+  widenClientFileUpload: true,
+
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
+
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
+})
