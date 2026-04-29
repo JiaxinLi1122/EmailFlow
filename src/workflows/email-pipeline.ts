@@ -1,5 +1,5 @@
 import { classifyEmail, extractTask, scorePriority, updateThreadMemory, matchMatter } from '@/ai'
-import { logError } from '@/lib/error-log'
+import * as Sentry from '@sentry/nextjs'
 import { preFilterEmail, prepareForClassification, prepareForExtraction } from '@/ai/utils'
 import * as emailRepo from '@/repositories/email-repo'
 import * as taskRepo from '@/repositories/task-repo'
@@ -817,11 +817,7 @@ export async function processEmail(
   }
   } catch (err) {
     console.error('[processEmail]', email.id, err)
-    try {
-      await logError('processEmail', err, userId)
-    } catch {
-      // log failure must not block fallback
-    }
+    Sentry.captureException(err, { tags: { action: 'processEmail' }, extra: { userId } })
     try {
       await emailRepo.markClassificationFailed(email.id)
     } catch (dbErr) {

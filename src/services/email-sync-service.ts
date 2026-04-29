@@ -1,5 +1,5 @@
 import { AppError } from '@/lib/app-errors'
-import { logError } from '@/lib/error-log'
+import * as Sentry from '@sentry/nextjs'
 import { gmailProvider } from '@/integrations'
 import { processEmail } from '@/workflows'
 import type { PipelineReviewCandidate } from '@/workflows'
@@ -169,7 +169,7 @@ export async function syncEmailsPhase1(userId: string, sinceDays: number = 7): P
   return { totalFetched: messages.length, syncedCount, skippedCount, failedCount, pendingFailedCount, syncBatchId, storedEmails }
   } catch (err) {
     console.error('[syncEmailsPhase1]', err)
-    await logError('syncEmailsPhase1', err, userId)
+    Sentry.captureException(err, { tags: { action: 'syncEmailsPhase1' }, extra: { userId } })
     throw err
   }
 }
@@ -234,7 +234,7 @@ export async function syncEmailsPhase2(userId: string, storedEmails: StoredEmail
   console.log(`[sync] phase2 total: ${Date.now() - t0}ms`)
   } catch (err) {
     console.error('[syncEmailsPhase2]', err)
-    await logError('syncEmailsPhase2', err, userId)
+    Sentry.captureException(err, { tags: { action: 'syncEmailsPhase2' }, extra: { userId } })
     throw err
   }
 }

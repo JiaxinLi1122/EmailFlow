@@ -413,17 +413,6 @@ model RetentionJobLog {
   @@index([userId, startedAt(sort: Desc)])
 }
 
-model ErrorLog {
-  id        String   @id @default(cuid())
-  userId    String?
-  action    String
-  error     String
-  stack     String?
-  createdAt DateTime @default(now())
-
-  @@index([action, createdAt(sort: Desc)])
-}
-
 enum RetentionStatus {
   ACTIVE
   ARCHIVED

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { TaskExtractionResult, PriorityResult } from '@/ai'
-import { logError } from '@/lib/error-log'
+import * as Sentry from '@sentry/nextjs'
 
 // ============================================================
 // Task Repository — all task database operations
@@ -52,7 +52,7 @@ export async function createTask(data: CreateTaskData) {
   return task
   } catch (err) {
     console.error('[createTask]', err)
-    await logError('createTask', err, data.userId)
+    Sentry.captureException(err, { tags: { action: 'createTask' }, extra: { userId: data.userId } })
     throw err
   }
 }

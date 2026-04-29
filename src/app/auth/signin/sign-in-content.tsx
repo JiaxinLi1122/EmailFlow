@@ -67,7 +67,7 @@ export function SignInContent() {
       if (data.isNewDevice) {
       toast.warning("New device detected. If this wasn't you, please secure your account.")
       }
-      router.push(data.data?.isAdmin ? '/admin/errors' : '/dashboard')
+      router.push('/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
