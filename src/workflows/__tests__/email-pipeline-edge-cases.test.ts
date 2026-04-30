@@ -76,10 +76,6 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-vi.mock('@/lib/error-log', () => ({
-  logError: vi.fn(),
-}))
-
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
@@ -92,7 +88,6 @@ import * as matterMemoryRepo from '@/repositories/matter-memory-repo'
 import * as identityRepo from '@/repositories/identity-repo'
 import * as projectContextRepo from '@/repositories/project-context-repo'
 import { prisma } from '@/lib/prisma'
-import { logError } from '@/lib/error-log'
 import type { ThreadMemory } from '@/repositories/thread-memory-repo'
 import type { MatterMemory } from '@/repositories/matter-memory-repo'
 import type { ProjectContext } from '@/repositories/project-context-repo'
@@ -205,7 +200,6 @@ beforeEach(() => {
   vi.mocked(prisma.senderMemory.create).mockResolvedValue({} as any)
   vi.mocked(prisma.senderMemory.update).mockResolvedValue({} as any)
   vi.mocked(prisma.taskEmail.create).mockResolvedValue({} as any)
-  vi.mocked(logError).mockResolvedValue(undefined as any)
 })
 
 // ---------------------------------------------------------------------------

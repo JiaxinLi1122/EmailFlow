@@ -40,10 +40,6 @@ vi.mock('@/repositories/failed-email-sync-repo', () => ({
   recordRetryFailure: vi.fn(),
 }))
 
-vi.mock('@/lib/error-log', () => ({
-  logError: vi.fn(),
-}))
-
 vi.mock('@/workflows', () => ({
   processEmail: vi.fn(),
 }))
@@ -56,7 +52,6 @@ import { gmailProvider } from '@/integrations'
 import * as emailRepo from '@/repositories/email-repo'
 import * as userRepo from '@/repositories/user-repo'
 import * as failedRepo from '@/repositories/failed-email-sync-repo'
-import { logError } from '@/lib/error-log'
 import { syncEmailsPhase1 } from '../email-sync-service'
 
 // ---------------------------------------------------------------------------
@@ -120,7 +115,6 @@ beforeEach(() => {
   vi.mocked(failedRepo.loadPendingFailures).mockResolvedValue([])
   vi.mocked(failedRepo.resolveFailedEmail).mockResolvedValue(undefined as any)
   vi.mocked(failedRepo.recordRetryFailure).mockResolvedValue(undefined as any)
-  vi.mocked(logError).mockResolvedValue(undefined as any)
 })
 
 // ---------------------------------------------------------------------------
@@ -146,13 +140,6 @@ describe('syncEmailsPhase1 — Gmail failure must not update lastSyncAt', () => 
     await expect(syncEmailsPhase1('user-1')).rejects.toThrow('Gmail API 500')
   })
 
-  it('calls logError when fetchNewEmails throws', async () => {
-    vi.mocked(gmailProvider.fetchNewEmails).mockRejectedValue(new Error('network error'))
-
-    await syncEmailsPhase1('user-1').catch(() => {})
-
-    expect(logError).toHaveBeenCalledWith('syncEmailsPhase1', expect.any(Error), 'user-1')
-  })
 })
 
 // ---------------------------------------------------------------------------

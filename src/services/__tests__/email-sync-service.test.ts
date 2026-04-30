@@ -28,10 +28,6 @@ vi.mock('@/repositories/failed-email-sync-repo', () => ({
   recordRetryFailure: vi.fn(),
 }))
 
-vi.mock('@/lib/error-log', () => ({
-  logError: vi.fn(),
-}))
-
 vi.mock('@/workflows', () => ({
   processEmail: vi.fn(),
 }))
@@ -44,7 +40,6 @@ import { gmailProvider } from '@/integrations'
 import * as emailRepo from '@/repositories/email-repo'
 import * as userRepo from '@/repositories/user-repo'
 import * as failedRepo from '@/repositories/failed-email-sync-repo'
-import { logError } from '@/lib/error-log'
 import { processEmail } from '@/workflows'
 import { syncEmailsPhase1, syncEmailsPhase2 } from '../email-sync-service'
 import { AppError } from '@/lib/app-errors'
@@ -109,7 +104,6 @@ beforeEach(() => {
   vi.mocked(failedRepo.loadPendingFailures).mockResolvedValue([])
   vi.mocked(failedRepo.resolveFailedEmail).mockResolvedValue(undefined as any)
   vi.mocked(failedRepo.recordRetryFailure).mockResolvedValue(undefined as any)
-  vi.mocked(logError).mockResolvedValue(undefined as any)
   vi.mocked(processEmail).mockResolvedValue({
     emailId: 'e1', classification: 'action', confidence: 0.9,
     taskCreated: false, skippedByRule: false,
